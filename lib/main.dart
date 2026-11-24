@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'core/constants/app_constants.dart';
 import 'features/mode_selection/mode_selection_screen.dart';
 
 void main() {
@@ -13,7 +14,7 @@ class MultiCamStudioApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'MultiCam Studio',
+      title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B0E14),

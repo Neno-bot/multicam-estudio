@@ -6,7 +6,7 @@ class CameraWebRTCService {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   bool _isFrontCamera = false;
-  bool _isMuted = false;
+  bool _isMuted = true; // Teléfonos silenciados por defecto (Solo Tablet usa audio)
   bool _isTorchOn = false;
   bool _remoteDescriptionSet = false;
   VideoQualityProfile _qualityProfile = VideoQualityProfile.hd720p;
@@ -32,7 +32,7 @@ class CameraWebRTCService {
     };
   }
 
-  /// Inicializa cámara y micrófono según el perfil de calidad elegido
+  /// Inicializa cámara y micrófono (silenciado por defecto para evitar eco con la Tablet)
   Future<MediaStream> initLocalMedia({
     VideoQualityProfile profile = VideoQualityProfile.hd720p,
   }) async {
@@ -42,6 +42,9 @@ class CameraWebRTCService {
       'video': _buildVideoConstraints(profile),
     };
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    for (final track in _localStream!.getAudioTracks()) {
+      track.enabled = !_isMuted;
+    }
     return _localStream!;
   }
 

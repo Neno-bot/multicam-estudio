@@ -12,6 +12,7 @@ class CameraSlotTile extends StatelessWidget {
   final bool isAudioActive;
   final bool showTelemetry;
   final VoidCallback? onTap;
+  final VoidCallback? onAddCameraTap;
   final VoidCallback? onToggleMute;
   final VoidCallback? onRemoteSwitchCamera;
   final VoidCallback? onRemoteToggleTorch;
@@ -26,6 +27,7 @@ class CameraSlotTile extends StatelessWidget {
     required this.isAudioActive,
     required this.showTelemetry,
     this.onTap,
+    this.onAddCameraTap,
     this.onToggleMute,
     this.onRemoteSwitchCamera,
     this.onRemoteToggleTorch,
@@ -45,7 +47,7 @@ class CameraSlotTile extends StatelessWidget {
                 : Colors.white10;
 
     return GestureDetector(
-      onTap: isConnected ? onTap : null,
+      onTap: isConnected ? onTap : (camera == null ? onAddCameraTap : null),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         decoration: BoxDecoration(
@@ -72,21 +74,33 @@ class CameraSlotTile extends StatelessWidget {
                   Icon(
                     camera != null
                         ? Icons.sync_rounded
-                        : Icons.videocam_off_outlined,
-                    color: Colors.grey.shade600,
+                        : Icons.qr_code_2_rounded,
+                    color: camera != null
+                        ? Colors.amber
+                        : const Color(0xFF60A5FA),
                     size: 28,
                   ),
                   const SizedBox(height: 6),
                   Text(
                     camera != null
                         ? 'Conectando...'
-                        : 'CAM ${slotIndex + 1} LIBRE',
+                        : 'CAM ${slotIndex + 1} • + AÑADIR',
                     style: TextStyle(
-                      color: Colors.grey.shade500,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade400,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (camera == null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'Toca para QR',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
                 ],
               ),
 

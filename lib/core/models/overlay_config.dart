@@ -11,7 +11,7 @@ class OverlayConfig {
   const OverlayConfig({
     this.isVisible = false,
     this.title = 'EN DIRECTO',
-    this.subtitle = 'MultiCam Studio',
+    this.subtitle = 'NenoCam Studio',
   });
 
   OverlayConfig copyWith({

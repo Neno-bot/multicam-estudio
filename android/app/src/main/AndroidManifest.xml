@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Permisos necesarios para captura multimedia y red Wi-Fi local -->
+    <!-- Permisos necesarios para captura multimedia, red Wi-Fi local y transmisión RTMP en vivo -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -7,12 +7,16 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
-        android:label="MultiCam Studio"
+        android:label="NenoCam Studio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:extractNativeLibs="true"
@@ -34,6 +38,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Servicio en primer plano para transmitir pantalla + micrófono de la Tablet a YouTube/Facebook Live -->
+        <service
+            android:name=".RtmpStreamService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection|microphone" />
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

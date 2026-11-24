@@ -1,7 +1,7 @@
 name: multicam_studio
-description: Aplicación multicámara de producción en vivo en red Wi-Fi local (Teléfonos Emisores -> Tablet Director).
+description: NenoCam Studio — Aplicación multicámara de producción en vivo con YouTube/Facebook Live, imágenes y videos.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.2.0+2
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -19,7 +19,7 @@ dependencies:
   # Gestión de estado reactiva
   provider: ^6.1.2
 
-  # Permisos de cámara y micrófono
+  # Permisos de cámara, micrófono y notificaciones
   permission_handler: ^11.3.1
 
   # Obtención de IP local Wi-Fi
@@ -31,10 +31,15 @@ dependencies:
   # Identificadores únicos por cámara
   uuid: ^4.5.1
 
-  # Fase 2: Emparejamiento QR / Escáner y grabación local
+  # Emparejamiento QR / Escáner y grabación local
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.2.3
   path_provider: ^2.1.4
+
+  # v1.2: Imágenes, videos locales y enlaces de actualización
+  image_picker: ^1.1.2
+  video_player: ^2.9.2
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

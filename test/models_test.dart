@@ -3,6 +3,7 @@ import 'package:multicam_studio/core/models/overlay_config.dart';
 import 'package:multicam_studio/core/models/signaling_message.dart';
 import 'package:multicam_studio/core/models/stream_stats.dart';
 import 'package:multicam_studio/core/models/video_quality_profile.dart';
+import 'package:multicam_studio/services/update/update_check_service.dart';
 
 void main() {
   group('SignalingMessage', () {
@@ -69,6 +70,18 @@ void main() {
       expect(live.isVisible, true);
       expect(live.title, 'Conferencia');
       expect(live.subtitle, 'Sala A');
+    });
+  });
+
+  group('UpdateCheckService', () {
+    test('detecta versiones más nuevas correctamente', () {
+      expect(
+        UpdateCheckService.extractVersion('NenoCam Studio v1.3 (Nueva)'),
+        '1.3',
+      );
+      expect(UpdateCheckService.isVersionNewer('1.3', '1.2.0'), true);
+      expect(UpdateCheckService.isVersionNewer('1.2.0', '1.2.0'), false);
+      expect(UpdateCheckService.isVersionNewer('1.1.9', '1.2.0'), false);
     });
   });
 }

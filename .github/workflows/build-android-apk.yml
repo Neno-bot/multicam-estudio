@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-android:
-    name: Compilar MultiCam Studio APK (Android)
+    name: Compilar NenoCam Studio APK (Android)
     runs-on: ubuntu-latest
 
     steps:
@@ -30,25 +30,33 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generar estructura Android, icono personalizado, firma Release y optimización Android 15
+      - name: Generar estructura Android, RTMP RootEncoder, icono NenoCam Studio y firma Release
         run: |
+          # Respaldar Manifest y código Kotlin nativo (RTMP YouTube/Facebook)
           cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml
+          mkdir -p /tmp/kotlin_backup
+          cp -r android/app/src/main/kotlin/com/multicam/studio/multicam_studio/* /tmp/kotlin_backup/
+
           flutter create . --platforms=android --project-name multicam_studio --org com.multicam.studio
+
+          # Restaurar Manifest y código Kotlin nativo
           cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/kotlin/com/multicam/studio/multicam_studio
+          cp -r /tmp/kotlin_backup/* android/app/src/main/kotlin/com/multicam/studio/multicam_studio/
           rm -f test/widget_test.dart
 
-          # 1. Generar firma Release válida (v1 + v2) para evitar rechazo de firmas debug en Android 14/15
+          # 1. Generar firma Release válida (v1 + v2) para Android 14/15
           keytool -genkeypair -v \
             -keystore android/app/release.jks \
-            -alias multicam \
+            -alias nenocam \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
-            -storepass multicam_release_key \
-            -keypass multicam_release_key \
-            -dname "CN=MultiCam Studio, OU=LiveProduction, O=MultiCam, L=Local, ST=Local, C=US"
+            -storepass nenocam_release_key \
+            -keypass nenocam_release_key \
+            -dname "CN=NenoCam Studio, OU=LiveProduction, O=NenoCam, L=Local, ST=Local, C=US"
 
-          # 2. Instalar icono profesional MultiCam Studio en todas las densidades Android
+          # 2. Instalar icono profesional NenoCam Studio en todas las densidades Android
           python3 -c "import PIL" 2>/dev/null || python3 -m pip install --break-system-packages -q pillow
           python3 - << 'ICONEOF'
           import os
@@ -72,7 +80,7 @@ jobs:
               print('Custom launcher icons generated successfully.')
           ICONEOF
 
-          # 3. Fondo oscuro profesional de arranque (evita destello blanco al abrir la app)
+          # 3. Fondo oscuro profesional de arranque (#0B0E14)
           for bg in android/app/src/main/res/drawable/launch_background.xml android/app/src/main/res/drawable-v21/launch_background.xml; do
             if [ -f "$bg" ]; then
               cat << 'BGEOF' > "$bg"
@@ -86,8 +94,8 @@ jobs:
             fi
           done
 
-          # 4. Actualizar Gradle 8.7, AGP 8.6.0, Kotlin 2.1.0, compileSdk 35, minSdk 23,
-          #    useLegacyPackaging (fix Android 15 + menor tamaño) y firma Release + R8 shrinking
+          # 4. Actualizar Gradle 8.7, AGP 8.6.0, Kotlin 2.1.0, JitPack + RootEncoder 2.5.4,
+          #    compileSdk 35, minSdk 23, useLegacyPackaging y firma Release + R8
           python3 - << 'PYEOF'
           import os, re
 
@@ -112,12 +120,17 @@ jobs:
                   (r'(org\.jetbrains\.kotlin\.android["\'\)\s]+version\s+["\'])[^"\']+(["\'])', r'\g<1>2.1.0\2'),
               ])
 
+          # Añadir repositorio JitPack para RootEncoder (RTMP / RTMPS)
+          patch('android/build.gradle', [
+              (r'(allprojects\s*\{\s*repositories\s*\{)', r'\1\n        maven { url "https://jitpack.io" }'),
+          ])
+
           groovy_release_block = '''    signingConfigs {
                   release {
                       storeFile file("release.jks")
-                      storePassword "multicam_release_key"
-                      keyAlias "multicam"
-                      keyPassword "multicam_release_key"
+                      storePassword "nenocam_release_key"
+                      keyAlias "nenocam"
+                      keyPassword "nenocam_release_key"
                       enableV1Signing true
                       enableV2Signing true
                   }
@@ -147,14 +160,24 @@ jobs:
               (r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35'),
               (r'buildTypes\s*\{\s*release\s*\{.*?\}\s*\}', groovy_release_block),
           ])
+
+          # Añadir dependencia RootEncoder en android/app/build.gradle
+          with open('android/app/build.gradle', 'r', encoding='utf-8') as f:
+              app_gradle = f.read()
+          if 'RootEncoder' not in app_gradle:
+              app_gradle += '\ndependencies {\n    implementation "com.github.pedroSG94.RootEncoder:library:2.5.4"\n}\n'
+              with open('android/app/build.gradle', 'w', encoding='utf-8') as f:
+                  f.write(app_gradle)
           PYEOF
 
-          # 5. Reglas ProGuard/R8 completas para reducir peso sin romper WebRTC/QR/mDNS
+          # 5. Reglas ProGuard/R8 completas para WebRTC, RootEncoder RTMP, QR y mDNS
           cat << 'EOF' > android/app/proguard-rules.pro
           -keep class org.webrtc.** { *; }
           -dontwarn org.webrtc.**
           -keep class com.cloudwebrtc.webrtc.** { *; }
           -dontwarn com.cloudwebrtc.webrtc.**
+          -keep class com.pedro.** { *; }
+          -dontwarn com.pedro.**
           -keep class com.google.mlkit.** { *; }
           -dontwarn com.google.mlkit.**
           -keep class dev.steenbakker.mobile_scanner.** { *; }
@@ -171,42 +194,48 @@ jobs:
       - name: Ejecutar pruebas automatizadas
         run: flutter test
 
-      - name: Compilar APKs ligeros por arquitectura (ARM64 + ARMv7)
+      - name: Compilar APKs ligeros de NenoCam Studio (ARM64 + ARMv7)
         run: |
           flutter build apk --release --split-per-abi
           ls -lh build/app/outputs/flutter-apk/
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
 
       - name: Verificar firma APK antes de publicar
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
-          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
 
       - name: Subir APKs como Artifact descargable
         uses: actions/upload-artifact@v4
         with:
-          name: MultiCam-Studio-Android-APKs
+          name: NenoCam-Studio-Android-APKs
           path: |
-            build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
-            build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
+            build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
+            build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
           retention-days: 30
 
-      - name: Publicar enlaces directos ligeros en GitHub Releases
+      - name: Publicar enlaces directos en GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-android-test
-          name: MultiCam Studio v1.1 (Ligero + Android 15 Fix)
+          name: NenoCam Studio v1.2 (YouTube/Facebook Live + Media + Solo Tablet)
           body: |
-            ### Descarga directa para Android (optimizado y firmado Release)
-            - **Teléfonos y Tablets Android modernos (64-bit, recomendado):** descarga **`MultiCam-Studio-arm64.apk`** (~25-35 MB).
-            - **Tablets/Teléfonos antiguos (32-bit):** descarga **`MultiCam-Studio-armv7.apk`**.
+            ### NenoCam Studio v1.2 — Descarga directa para Android
+            - **Teléfonos y Tablets modernos (64-bit, recomendado):** **`NenoCam-Studio-arm64.apk`**
+            - **Dispositivos antiguos (32-bit):** **`NenoCam-Studio-armv7.apk`**
 
-            > **Nota para Samsung (One UI 6/7):** Si aparece "No se instaló la app", ve a *Ajustes → Seguridad y privacidad → Bloqueador automático (Auto Blocker)* y desactívalo temporalmente para instalar el APK.
+            #### Novedades v1.2
+            - Nombre oficial **NenoCam Studio**
+            - **Transmisión EN VIVO a YouTube Live (RTMP) y Facebook Live (RTMPS)** con Modo Pantalla Limpia
+            - **Imágenes (logos / placas)** y **Videos locales (MP4)** directamente en el Monitor EN VIVO
+            - **Audio Solo Tablet por defecto** (teléfonos emisores silenciados, cero eco)
+            - **2 códigos QR** al tocar cualquier casilla vacía (`Conectar Cámara` e `Instalar App`)
+            - **Buscador de actualizaciones** integrado en la pantalla principal
           files: |
-            build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
-            build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
+            build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
+            build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

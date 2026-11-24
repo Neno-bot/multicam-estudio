@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/network_constants.dart';
+import '../../core/models/media_overlay_config.dart';
 import '../../core/models/overlay_config.dart';
 import '../../core/utils/device_utils.dart';
 import 'director_controller.dart';
 import 'widgets/camera_slot_tile.dart';
 import 'widgets/director_qr_dialog.dart';
 import 'widgets/live_program_monitor.dart';
+import 'widgets/live_stream_dialog.dart';
 import 'widgets/lower_third_dialog.dart';
+import 'widgets/media_manager_dialog.dart';
 import 'widgets/preview_monitor.dart';
 
 class DirectorScreen extends StatefulWidget {
@@ -43,12 +47,17 @@ class _DirectorScreenState extends State<DirectorScreen> {
 class _DirectorView extends StatelessWidget {
   const _DirectorView();
 
-  void _showQrDialog(BuildContext context, DirectorController ctrl) {
+  void _showQrDialog(
+    BuildContext context,
+    DirectorController ctrl, {
+    int initialTab = 0,
+  }) {
     showDialog<void>(
       context: context,
       builder: (_) => DirectorQrDialog(
         hostIp: ctrl.localIp,
         port: NetworkConstants.signalingPort,
+        initialTab: initialTab,
       ),
     );
   }
@@ -63,6 +72,43 @@ class _DirectorView extends StatelessWidget {
     );
     if (result != null) {
       ctrl.updateOverlay(result);
+    }
+  }
+
+  void _showMediaDialog(BuildContext context, DirectorController ctrl) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => ChangeNotifierProvider.value(
+        value: ctrl,
+        child: const MediaManagerDialog(),
+      ),
+    );
+  }
+
+  Future<void> _showLiveStreamDialog(
+    BuildContext context,
+    DirectorController ctrl,
+  ) async {
+    final config = await showDialog<LiveStreamConfig>(
+      context: context,
+      builder: (_) => LiveStreamDialog(
+        isCurrentlyStreaming: ctrl.isRtmpLive,
+        currentStatusMessage: ctrl.rtmpStatusMessage,
+        onStopStream: ctrl.stopRtmpLive,
+      ),
+    );
+
+    if (config == null) return;
+    await ctrl.startRtmpLive(
+      rtmpUrl: config.fullRtmpUrl,
+      bitrateKbps: config.bitrateKbps,
+      enterCleanMode: config.enterCleanMode,
+    );
+
+    if (context.mounted && ctrl.lastError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ctrl.lastError!)),
+      );
     }
   }
 
@@ -104,10 +150,100 @@ class _DirectorView extends StatelessWidget {
       activeCamera: ctrl.activeLiveCamera,
       isFadingTransition: ctrl.isFadingTransition,
       overlayConfig: ctrl.overlayConfig,
+      imageOverlay: ctrl.imageOverlay,
+      localVideoController: ctrl.localVideoController,
+      isPlayingLocalVideo: ctrl.isPlayingLocalVideo,
       isRecording: ctrl.isRecording,
       recordingDuration: ctrl.recordingDuration,
+      isRtmpLive: ctrl.isRtmpLive,
+      rtmpBitrateKbps: ctrl.rtmpBitrateKbps,
       showTelemetry: ctrl.showTelemetry,
+      cleanMode: ctrl.cleanBroadcastMode,
     );
+
+    // MODO PANTALLA LIMPIA (Ideal para transmitir a YouTube Live / Facebook Live)
+    if (ctrl.cleanBroadcastMode) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            programMonitor,
+            // Barra flotante discreta abajo a la derecha para cambiar cámaras o salir
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(155),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ...List.generate(NetworkConstants.maxConnectedCameras, (i) {
+                      final cam = ctrl.slots[i];
+                      final ready = cam != null && cam.stream != null;
+                      final live = ready &&
+                          !ctrl.isPlayingLocalVideo &&
+                          cam.id == ctrl.activeLiveCameraId;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 3),
+                        child: InkWell(
+                          onTap: ready
+                              ? () => ctrl.selectLiveCamera(cam.id)
+                              : null,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: 30,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: live
+                                  ? const Color(0xFFEF4444)
+                                  : ready
+                                      ? Colors.white24
+                                      : Colors.white10,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text(
+                              '${i + 1}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: ready ? Colors.white : Colors.white38,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Imágenes y Videos',
+                      onPressed: () => _showMediaDialog(context, ctrl),
+                      icon: const Icon(Icons.perm_media_rounded, size: 18),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Salir de Pantalla Limpia',
+                      onPressed: ctrl.toggleCleanBroadcastMode,
+                      icon: const Icon(Icons.fullscreen_exit_rounded, size: 19),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final hasActiveMedia =
+        ctrl.imageOverlay.isVisible || ctrl.isPlayingLocalVideo;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0B0E14),
@@ -116,7 +252,7 @@ class _DirectorView extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Column(
             children: [
-              // Cabecera de control profesional del Director
+              // Cabecera de control profesional de NenoCam Studio
               SizedBox(
                 height: 44,
                 child: Row(
@@ -127,9 +263,9 @@ class _DirectorView extends StatelessWidget {
                       tooltip: 'Salir del Modo Director',
                     ),
                     const SizedBox(width: 4),
-                    const Text(
-                      'DIRECTOR STUDIO',
-                      style: TextStyle(
+                    Text(
+                      AppConstants.appName.toUpperCase(),
+                      style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.1,
                         fontSize: 14,
@@ -137,7 +273,6 @@ class _DirectorView extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
 
-                    // Barra de controles Fases 2 y 3
                     Expanded(
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
@@ -145,43 +280,71 @@ class _DirectorView extends StatelessWidget {
                         child: Row(
                           children: [
                             _ActionChip(
-                              icon: Icons.qr_code_2_rounded,
-                              label: 'QR • ${ctrl.localIp}',
+                              icon: ctrl.isRtmpLive
+                                  ? Icons.podcasts_rounded
+                                  : Icons.live_tv_rounded,
+                              label: ctrl.isRtmpLive
+                                  ? 'EN VIVO (YT/FB)'
+                                  : 'TRANSMITIR',
+                              color: const Color(0xFFEF4444),
+                              highlighted: ctrl.isRtmpLive,
+                              onTap: () => _showLiveStreamDialog(context, ctrl),
+                            ),
+                            const SizedBox(width: 8),
+                            _ActionChip(
+                              icon: Icons.perm_media_rounded,
+                              label: 'MEDIA',
                               color: const Color(0xFF3B82F6),
+                              highlighted: hasActiveMedia,
+                              onTap: () => _showMediaDialog(context, ctrl),
+                            ),
+                            const SizedBox(width: 8),
+                            _ActionChip(
+                              icon: Icons.subtitles_rounded,
+                              label: 'RÓTULO',
+                              color: ctrl.overlayConfig.isVisible
+                                  ? const Color(0xFFEF4444)
+                                  : Colors.grey.shade400,
+                              highlighted: ctrl.overlayConfig.isVisible,
+                              onTap: () =>
+                                  _showLowerThirdDialog(context, ctrl),
+                            ),
+                            const SizedBox(width: 8),
+                            _ActionChip(
+                              icon: ctrl.audioMixMode == AudioMixMode.tabletOnly
+                                  ? Icons.mic_rounded
+                                  : ctrl.audioMixMode == AudioMixMode.afv
+                                      ? Icons.hearing_rounded
+                                      : Icons.graphic_eq_rounded,
+                              label: 'AUDIO: ${ctrl.audioModeLabel}',
+                              color: ctrl.audioMixMode == AudioMixMode.tabletOnly
+                                  ? const Color(0xFF22C55E)
+                                  : const Color(0xFFF59E0B),
+                              onTap: ctrl.cycleAudioMixMode,
+                            ),
+                            const SizedBox(width: 8),
+                            _ActionChip(
+                              icon: Icons.qr_code_2_rounded,
+                              label: 'AÑADIR CAM',
+                              color: const Color(0xFF60A5FA),
                               onTap: () => _showQrDialog(context, ctrl),
+                            ),
+                            const SizedBox(width: 8),
+                            _ActionChip(
+                              icon: Icons.fullscreen_rounded,
+                              label: 'LIMPIO',
+                              color: const Color(0xFF14B8A6),
+                              onTap: ctrl.toggleCleanBroadcastMode,
                             ),
                             const SizedBox(width: 8),
                             _ActionChip(
                               icon: ctrl.studioMode
                                   ? Icons.view_column_rounded
                                   : Icons.crop_landscape_rounded,
-                              label: ctrl.studioMode
-                                  ? 'ESTUDIO (PVW/PGM)'
-                                  : 'DIRECTO',
+                              label: ctrl.studioMode ? 'ESTUDIO' : 'DIRECTO',
                               color: const Color(0xFF14B8A6),
                               highlighted: ctrl.studioMode,
                               onTap: ctrl.toggleStudioMode,
-                            ),
-                            const SizedBox(width: 8),
-                            _ActionChip(
-                              icon: Icons.speed_rounded,
-                              label: 'STATS',
-                              color: const Color(0xFF60A5FA),
-                              highlighted: ctrl.showTelemetry,
-                              onTap: ctrl.toggleTelemetry,
-                            ),
-                            const SizedBox(width: 8),
-                            _ActionChip(
-                              icon: ctrl.audioFollowsVideo
-                                  ? Icons.hearing_rounded
-                                  : Icons.graphic_eq_rounded,
-                              label: ctrl.audioFollowsVideo
-                                  ? 'AUDIO: AFV'
-                                  : 'AUDIO: MIX',
-                              color: ctrl.audioFollowsVideo
-                                  ? const Color(0xFF22C55E)
-                                  : const Color(0xFFF59E0B),
-                              onTap: ctrl.toggleAudioFollowsVideo,
                             ),
                             const SizedBox(width: 8),
                             _ActionChip(
@@ -194,14 +357,11 @@ class _DirectorView extends StatelessWidget {
                             ),
                             const SizedBox(width: 8),
                             _ActionChip(
-                              icon: Icons.subtitles_rounded,
-                              label: 'RÓTULO',
-                              color: ctrl.overlayConfig.isVisible
-                                  ? const Color(0xFFEF4444)
-                                  : Colors.grey.shade400,
-                              highlighted: ctrl.overlayConfig.isVisible,
-                              onTap: () =>
-                                  _showLowerThirdDialog(context, ctrl),
+                              icon: Icons.speed_rounded,
+                              label: 'STATS',
+                              color: const Color(0xFF60A5FA),
+                              highlighted: ctrl.showTelemetry,
+                              onTap: ctrl.toggleTelemetry,
                             ),
                             const SizedBox(width: 8),
                             _ActionChip(
@@ -269,8 +429,9 @@ class _DirectorView extends StatelessWidget {
                     NetworkConstants.maxConnectedCameras,
                     (index) {
                       final cam = ctrl.slots[index];
-                      final isLive =
-                          cam != null && cam.id == ctrl.activeLiveCameraId;
+                      final isLive = cam != null &&
+                          !ctrl.isPlayingLocalVideo &&
+                          cam.id == ctrl.activeLiveCameraId;
                       final isPreview = ctrl.studioMode &&
                           cam != null &&
                           !isLive &&
@@ -296,6 +457,7 @@ class _DirectorView extends StatelessWidget {
                             onTap: cam != null
                                 ? () => ctrl.onSlotTapped(cam.id)
                                 : null,
+                            onAddCameraTap: () => _showQrDialog(context, ctrl),
                             onToggleMute: cam != null
                                 ? () => ctrl.toggleCameraMute(cam.id)
                                 : null,
