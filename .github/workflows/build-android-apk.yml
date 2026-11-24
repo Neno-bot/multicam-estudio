@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -35,6 +35,7 @@ jobs:
           cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml
           flutter create . --platforms=android --project-name multicam_studio --org com.multicam.studio
           cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          rm -f test/widget_test.dart
 
           # Asegurar minSdk >= 23 para flutter_webrtc y mobile_scanner
           if [ -f android/app/build.gradle ]; then
