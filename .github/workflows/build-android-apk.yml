@@ -37,14 +37,47 @@ jobs:
           cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           rm -f test/widget_test.dart
 
-          # Asegurar minSdk >= 23 para flutter_webrtc y mobile_scanner
-          if [ -f android/app/build.gradle ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
-          fi
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
-          fi
+          # Actualizar Gradle 8.7, AGP 8.6.0, Kotlin 2.1.0, compileSdk 35 y minSdk 23
+          python3 - << 'PYEOF'
+          import os, re
+
+          def patch(path, replacements):
+              if not os.path.exists(path):
+                  return
+              with open(path, 'r', encoding='utf-8') as f:
+                  text = f.read()
+              for pattern, repl in replacements:
+                  text = re.sub(pattern, repl, text)
+              with open(path, 'w', encoding='utf-8') as f:
+                  f.write(text)
+              print(f'Patched: {path}')
+
+          patch('android/gradle/wrapper/gradle-wrapper.properties', [
+              (r'gradle-[0-9.]+-(all|bin)\.zip', 'gradle-8.7-all.zip'),
+          ])
+
+          for sfile in ('android/settings.gradle', 'android/settings.gradle.kts'):
+              patch(sfile, [
+                  (r'(com\.android\.application["\'\)\s]+version\s+["\'])[^"\']+(["\'])', r'\g<1>8.6.0\2'),
+                  (r'(org\.jetbrains\.kotlin\.android["\'\)\s]+version\s+["\'])[^"\']+(["\'])', r'\g<1>2.1.0\2'),
+              ])
+
+          for bfile in ('android/app/build.gradle', 'android/app/build.gradle.kts'):
+              patch(bfile, [
+                  (r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35'),
+                  (r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35'),
+                  (r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23'),
+                  (r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 23'),
+              ])
+          PYEOF
+
+          # Reglas ProGuard/R8 para preservar clases JNI de WebRTC y MLKit
+          cat << 'EOF' > android/app/proguard-rules.pro
+          -keep class org.webrtc.** { *; }
+          -dontwarn org.webrtc.**
+          -keep class com.google.mlkit.** { *; }
+          -dontwarn com.google.mlkit.**
+          EOF
 
       - name: Instalar dependencias Flutter
         run: flutter pub get
