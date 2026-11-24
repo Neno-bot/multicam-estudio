@@ -1,0 +1,45 @@
+name: multicam_studio
+description: Aplicación multicámara de producción en vivo en red Wi-Fi local (Teléfonos Emisores -> Tablet Director).
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Streaming WebRTC P2P de baja latencia
+  flutter_webrtc: ^0.12.0
+
+  # Descubrimiento mDNS en red Wi-Fi local (complementa UDP Broadcast nativo)
+  bonsoir: ^5.1.10
+
+  # Gestión de estado reactiva
+  provider: ^6.1.2
+
+  # Permisos de cámara y micrófono
+  permission_handler: ^11.3.1
+
+  # Obtención de IP local Wi-Fi
+  network_info_plus: ^6.0.2
+
+  # Mantener pantalla encendida durante producción en vivo
+  wakelock_plus: ^1.2.8
+
+  # Identificadores únicos por cámara
+  uuid: ^4.5.1
+
+  # Fase 2: Emparejamiento QR / Escáner y grabación local
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^5.2.3
+  path_provider: ^2.1.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
