@@ -30,14 +30,64 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Generar estructura Gradle de Android conservando permisos
+      - name: Generar estructura Android, icono personalizado, firma Release y optimización Android 15
         run: |
           cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml
           flutter create . --platforms=android --project-name multicam_studio --org com.multicam.studio
           cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           rm -f test/widget_test.dart
 
-          # Actualizar Gradle 8.7, AGP 8.6.0, Kotlin 2.1.0, compileSdk 35 y minSdk 23
+          # 1. Generar firma Release válida (v1 + v2) para evitar rechazo de firmas debug en Android 14/15
+          keytool -genkeypair -v \
+            -keystore android/app/release.jks \
+            -alias multicam \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass multicam_release_key \
+            -keypass multicam_release_key \
+            -dname "CN=MultiCam Studio, OU=LiveProduction, O=MultiCam, L=Local, ST=Local, C=US"
+
+          # 2. Instalar icono profesional MultiCam Studio en todas las densidades Android
+          python3 -c "import PIL" 2>/dev/null || python3 -m pip install --break-system-packages -q pillow
+          python3 - << 'ICONEOF'
+          import os
+          from PIL import Image
+
+          src = 'assets/icon/app_icon.png'
+          if os.path.exists(src):
+              img = Image.open(src).convert('RGBA')
+              sizes = {
+                  'mipmap-mdpi': 48,
+                  'mipmap-hdpi': 72,
+                  'mipmap-xhdpi': 96,
+                  'mipmap-xxhdpi': 144,
+                  'mipmap-xxxhdpi': 192,
+              }
+              for folder, size in sizes.items():
+                  out_dir = os.path.join('android/app/src/main/res', folder)
+                  os.makedirs(out_dir, exist_ok=True)
+                  resized = img.resize((size, size), Image.Resampling.LANCZOS)
+                  resized.save(os.path.join(out_dir, 'ic_launcher.png'), 'PNG')
+              print('Custom launcher icons generated successfully.')
+          ICONEOF
+
+          # 3. Fondo oscuro profesional de arranque (evita destello blanco al abrir la app)
+          for bg in android/app/src/main/res/drawable/launch_background.xml android/app/src/main/res/drawable-v21/launch_background.xml; do
+            if [ -f "$bg" ]; then
+              cat << 'BGEOF' > "$bg"
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item>
+                  <color android:color="#0B0E14" />
+              </item>
+          </layer-list>
+          BGEOF
+            fi
+          done
+
+          # 4. Actualizar Gradle 8.7, AGP 8.6.0, Kotlin 2.1.0, compileSdk 35, minSdk 23,
+          #    useLegacyPackaging (fix Android 15 + menor tamaño) y firma Release + R8 shrinking
           python3 - << 'PYEOF'
           import os, re
 
@@ -47,7 +97,7 @@ jobs:
               with open(path, 'r', encoding='utf-8') as f:
                   text = f.read()
               for pattern, repl in replacements:
-                  text = re.sub(pattern, repl, text)
+                  text = re.sub(pattern, repl, text, flags=re.DOTALL)
               with open(path, 'w', encoding='utf-8') as f:
                   f.write(text)
               print(f'Patched: {path}')
@@ -62,21 +112,57 @@ jobs:
                   (r'(org\.jetbrains\.kotlin\.android["\'\)\s]+version\s+["\'])[^"\']+(["\'])', r'\g<1>2.1.0\2'),
               ])
 
-          for bfile in ('android/app/build.gradle', 'android/app/build.gradle.kts'):
-              patch(bfile, [
-                  (r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35'),
-                  (r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35'),
-                  (r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23'),
-                  (r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 23'),
-              ])
+          groovy_release_block = '''    signingConfigs {
+                  release {
+                      storeFile file("release.jks")
+                      storePassword "multicam_release_key"
+                      keyAlias "multicam"
+                      keyPassword "multicam_release_key"
+                      enableV1Signing true
+                      enableV2Signing true
+                  }
+              }
+
+              packaging {
+                  jniLibs {
+                      useLegacyPackaging = true
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                      minifyEnabled true
+                      shrinkResources true
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }'''
+
+          patch('android/app/build.gradle', [
+              (r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35'),
+              (r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35'),
+              (r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23'),
+              (r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 23'),
+              (r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35'),
+              (r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35'),
+              (r'buildTypes\s*\{\s*release\s*\{.*?\}\s*\}', groovy_release_block),
+          ])
           PYEOF
 
-          # Reglas ProGuard/R8 para preservar clases JNI de WebRTC y MLKit
+          # 5. Reglas ProGuard/R8 completas para reducir peso sin romper WebRTC/QR/mDNS
           cat << 'EOF' > android/app/proguard-rules.pro
           -keep class org.webrtc.** { *; }
           -dontwarn org.webrtc.**
+          -keep class com.cloudwebrtc.webrtc.** { *; }
+          -dontwarn com.cloudwebrtc.webrtc.**
           -keep class com.google.mlkit.** { *; }
           -dontwarn com.google.mlkit.**
+          -keep class dev.steenbakker.mobile_scanner.** { *; }
+          -dontwarn dev.steenbakker.mobile_scanner.**
+          -keep class fr.skyost.bonsoir.** { *; }
+          -dontwarn fr.skyost.bonsoir.**
+          -keep class com.baseflow.permissionhandler.** { *; }
+          -keep class dev.fluttercommunity.plus.** { *; }
           EOF
 
       - name: Instalar dependencias Flutter
@@ -85,27 +171,42 @@ jobs:
       - name: Ejecutar pruebas automatizadas
         run: flutter test
 
-      - name: Compilar APK Release para Android
+      - name: Compilar APKs ligeros por arquitectura (ARM64 + ARMv7)
         run: |
-          flutter build apk --release
-          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/MultiCam-Studio.apk
+          flutter build apk --release --split-per-abi
+          ls -lh build/app/outputs/flutter-apk/
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
 
-      - name: Subir APK como Artifact descargable
+      - name: Verificar firma APK antes de publicar
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
+          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
+
+      - name: Subir APKs como Artifact descargable
         uses: actions/upload-artifact@v4
         with:
-          name: MultiCam-Studio-Android-APK
-          path: build/app/outputs/flutter-apk/MultiCam-Studio.apk
+          name: MultiCam-Studio-Android-APKs
+          path: |
+            build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
+            build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
           retention-days: 30
 
-      - name: Publicar enlace directo de descarga en GitHub Releases
+      - name: Publicar enlaces directos ligeros en GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-android-test
-          name: MultiCam Studio (Última compilación Android)
+          name: MultiCam Studio v1.1 (Ligero + Android 15 Fix)
           body: |
-            Descarga e instala `MultiCam-Studio.apk` directamente en tu **Teléfono Android** (Modo Cámara) y tu **Tablet Android** (Modo Director).
-            Ambos dispositivos deben estar conectados a la misma red Wi-Fi local.
-          files: build/app/outputs/flutter-apk/MultiCam-Studio.apk
+            ### Descarga directa para Android (optimizado y firmado Release)
+            - **Teléfonos y Tablets Android modernos (64-bit, recomendado):** descarga **`MultiCam-Studio-arm64.apk`** (~25-35 MB).
+            - **Tablets/Teléfonos antiguos (32-bit):** descarga **`MultiCam-Studio-armv7.apk`**.
+
+            > **Nota para Samsung (One UI 6/7):** Si aparece "No se instaló la app", ve a *Ajustes → Seguridad y privacidad → Bloqueador automático (Auto Blocker)* y desactívalo temporalmente para instalar el APK.
+          files: |
+            build/app/outputs/flutter-apk/MultiCam-Studio-arm64.apk
+            build/app/outputs/flutter-apk/MultiCam-Studio-armv7.apk
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
