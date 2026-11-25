@@ -69,7 +69,7 @@ class CameraSlotTile extends StatelessWidget {
               )
             else
               Padding(
-                padding: const EdgeInsets.only(bottom: 22),
+                padding: const EdgeInsets.only(bottom: 20, left: 4, right: 4),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -80,17 +80,21 @@ class CameraSlotTile extends StatelessWidget {
                       color: camera != null
                           ? Colors.amber
                           : const Color(0xFF60A5FA),
-                      size: 22,
+                      size: 20,
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      camera != null
-                          ? 'Conectando...'
-                          : '+ AÑADIR QR',
-                      style: TextStyle(
-                        color: Colors.grey.shade400,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        camera != null
+                            ? 'Conectando...'
+                            : '+ AÑADIR QR',
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -125,91 +129,98 @@ class CameraSlotTile extends StatelessWidget {
             // Controles rápidos remotos (Mute / Calidad / Flip / Linterna)
             if (isConnected)
               Positioned(
-                top: 6,
-                right: 6,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _MiniControlButton(
-                      icon: camera!.isAudioMuted
-                          ? Icons.volume_off_rounded
-                          : Icons.volume_up_rounded,
-                      color: camera!.isAudioMuted
-                          ? Colors.redAccent
-                          : isAudioActive
-                              ? const Color(0xFF22C55E)
-                              : Colors.white70,
-                      tooltip: camera!.isAudioMuted
-                          ? 'Activar audio'
-                          : 'Silenciar cámara',
-                      onPressed: onToggleMute,
-                    ),
-                    const SizedBox(width: 4),
-                    PopupMenuButton<VideoQualityProfile>(
-                      tooltip: 'Cambiar calidad remota',
-                      padding: EdgeInsets.zero,
-                      color: const Color(0xFF141923),
-                      onSelected: onRemoteSelectQuality,
-                      itemBuilder: (_) => VideoQualityProfile.values
-                          .map(
-                            (p) => PopupMenuItem(
-                              value: p,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    camera!.quality == p
-                                        ? Icons.check_rounded
-                                        : Icons.hd_outlined,
-                                    size: 16,
-                                    color: camera!.quality == p
-                                        ? const Color(0xFF3B82F6)
-                                        : Colors.white70,
+                top: 4,
+                right: 4,
+                left: 4,
+                child: Align(
+                  alignment: Alignment.topRight,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _MiniControlButton(
+                          icon: camera!.isAudioMuted
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: camera!.isAudioMuted
+                              ? Colors.redAccent
+                              : isAudioActive
+                                  ? const Color(0xFF22C55E)
+                                  : Colors.white70,
+                          tooltip: camera!.isAudioMuted
+                              ? 'Activar audio'
+                              : 'Silenciar cámara',
+                          onPressed: onToggleMute,
+                        ),
+                        const SizedBox(width: 3),
+                        PopupMenuButton<VideoQualityProfile>(
+                          tooltip: 'Cambiar calidad remota',
+                          padding: EdgeInsets.zero,
+                          color: const Color(0xFF141923),
+                          onSelected: onRemoteSelectQuality,
+                          itemBuilder: (_) => VideoQualityProfile.values
+                              .map(
+                                (p) => PopupMenuItem(
+                                  value: p,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        camera!.quality == p
+                                            ? Icons.check_rounded
+                                            : Icons.hd_outlined,
+                                        size: 16,
+                                        color: camera!.quality == p
+                                            ? const Color(0xFF3B82F6)
+                                            : Colors.white70,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(p.label),
+                                    ],
                                   ),
-                                  const SizedBox(width: 8),
-                                  Text(p.label),
-                                ],
+                                ),
+                              )
+                              .toList(),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withAlpha(165),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              camera!.quality.id,
+                              style: const TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF60A5FA),
                               ),
                             ),
-                          )
-                          .toList(),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withAlpha(165),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          camera!.quality.id,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF60A5FA),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 3),
+                        _MiniControlButton(
+                          icon: Icons.cameraswitch_rounded,
+                          color: Colors.white,
+                          tooltip: 'Voltear cámara remotamente',
+                          onPressed: onRemoteSwitchCamera,
+                        ),
+                        const SizedBox(width: 3),
+                        _MiniControlButton(
+                          icon: camera!.isTorchOn
+                              ? Icons.flash_on_rounded
+                              : Icons.flash_off_rounded,
+                          color: camera!.isTorchOn
+                              ? Colors.amber
+                              : Colors.white70,
+                          tooltip: 'Alternar linterna remota',
+                          onPressed: onRemoteToggleTorch,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 4),
-                    _MiniControlButton(
-                      icon: Icons.cameraswitch_rounded,
-                      color: Colors.white,
-                      tooltip: 'Voltear cámara remotamente',
-                      onPressed: onRemoteSwitchCamera,
-                    ),
-                    const SizedBox(width: 4),
-                    _MiniControlButton(
-                      icon: camera!.isTorchOn
-                          ? Icons.flash_on_rounded
-                          : Icons.flash_off_rounded,
-                      color: camera!.isTorchOn
-                          ? Colors.amber
-                          : Colors.white70,
-                      tooltip: 'Alternar linterna remota',
-                      onPressed: onRemoteToggleTorch,
-                    ),
-                  ],
+                  ),
                 ),
               ),
 
@@ -308,8 +319,8 @@ class _MiniControlButton extends StatelessWidget {
           onTap: onPressed,
           borderRadius: BorderRadius.circular(6),
           child: Padding(
-            padding: const EdgeInsets.all(5),
-            child: Icon(icon, size: 15, color: color),
+            padding: const EdgeInsets.all(3.5),
+            child: Icon(icon, size: 13.5, color: color),
           ),
         ),
       ),

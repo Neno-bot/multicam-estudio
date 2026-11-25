@@ -85,6 +85,20 @@ void main() {
       expect(UpdateCheckService.isVersionNewer('1.2.0', '1.2.0'), false);
       expect(UpdateCheckService.isVersionNewer('1.1.9', '1.2.0'), false);
     });
+
+    test('prioriza NenoCam-Studio-arm64.apk sobre archivos heredados', () {
+      final url = UpdateCheckService.selectBestArm64AssetUrl([
+        {
+          'name': 'MultiCam-Studio-arm64.apk',
+          'browser_download_url': 'https://example.com/old-arm64.apk',
+        },
+        {
+          'name': 'NenoCam-Studio-arm64.apk',
+          'browser_download_url': 'https://example.com/nenocam-arm64.apk',
+        },
+      ]);
+      expect(url, 'https://example.com/nenocam-arm64.apk');
+    });
   });
 
   group('MediaCueItem', () {

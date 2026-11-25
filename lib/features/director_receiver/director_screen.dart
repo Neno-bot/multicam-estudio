@@ -426,105 +426,122 @@ class _DirectorView extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              // Área Superior (~66%): Monitor EN VIVO + Bandeja PAUTA MEDIA a la derecha (adaptable a Teléfono y Tablet)
+              // Área Principal de Producción:
+              // Izquierda (~67%): Monitor EN VIVO arriba + 4 Cámaras compactas abajo
+              // Derecha (~33%): Dos cuadros independientes deslizables -> IMÁGENES arriba + VIDEOS abajo
               Expanded(
-                flex: 66,
                 child: Row(
                   children: [
                     Expanded(
-                      flex: ctrl.showPautaPanel ? 68 : 100,
-                      child: ctrl.studioMode
-                          ? Row(
-                              children: [
-                                Expanded(
-                                  child: PreviewMonitor(
-                                    previewRenderer: ctrl.previewRenderer,
-                                    previewCamera: ctrl.previewCamera,
-                                    showTelemetry: ctrl.showTelemetry,
-                                  ),
-                                ),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  child: _TakeControlColumn(
-                                    canTake: ctrl.canTake,
-                                    transitionMode: ctrl.transitionMode,
-                                    onTake: ctrl.takePreviewToLive,
-                                    onToggleTransition:
-                                        ctrl.toggleTransitionMode,
-                                  ),
-                                ),
-                                Expanded(child: programMonitor),
-                              ],
-                            )
-                          : programMonitor,
+                      flex: ctrl.showPautaPanel ? 67 : 100,
+                      child: Column(
+                        children: [
+                          // Monitor EN VIVO (o PVW + TAKE + PGM en Modo Estudio)
+                          Expanded(
+                            flex: 66,
+                            child: ctrl.studioMode
+                                ? Row(
+                                    children: [
+                                      Expanded(
+                                        child: PreviewMonitor(
+                                          previewRenderer: ctrl.previewRenderer,
+                                          previewCamera: ctrl.previewCamera,
+                                          showTelemetry: ctrl.showTelemetry,
+                                        ),
+                                      ),
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 6,
+                                        ),
+                                        child: _TakeControlColumn(
+                                          canTake: ctrl.canTake,
+                                          transitionMode: ctrl.transitionMode,
+                                          onTake: ctrl.takePreviewToLive,
+                                          onToggleTransition:
+                                              ctrl.toggleTransitionMode,
+                                        ),
+                                      ),
+                                      Expanded(child: programMonitor),
+                                    ],
+                                  )
+                                : programMonitor,
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Cuadrícula compacta para las 4 cámaras debajo del monitor
+                          Expanded(
+                            flex: 34,
+                            child: Row(
+                              children: List.generate(
+                                NetworkConstants.maxConnectedCameras,
+                                (index) {
+                                  final cam = ctrl.slots[index];
+                                  final isLive = cam != null &&
+                                      !ctrl.isPlayingLocalVideo &&
+                                      cam.id == ctrl.activeLiveCameraId;
+                                  final isPreview = ctrl.studioMode &&
+                                      cam != null &&
+                                      !isLive &&
+                                      cam.id == ctrl.previewCameraId;
+
+                                  return Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(
+                                        left: index == 0 ? 0 : 3,
+                                        right: index ==
+                                                NetworkConstants
+                                                        .maxConnectedCameras -
+                                                    1
+                                            ? 0
+                                            : 3,
+                                      ),
+                                      child: CameraSlotTile(
+                                        slotIndex: index,
+                                        camera: cam,
+                                        isLive: isLive,
+                                        isPreview: isPreview,
+                                        isAudioActive: cam != null &&
+                                            ctrl.isCameraAudioActive(cam),
+                                        showTelemetry: ctrl.showTelemetry,
+                                        onTap: cam != null
+                                            ? () => ctrl.onSlotTapped(cam.id)
+                                            : null,
+                                        onAddCameraTap: () =>
+                                            _showQrDialog(context, ctrl),
+                                        onToggleMute: cam != null
+                                            ? () =>
+                                                ctrl.toggleCameraMute(cam.id)
+                                            : null,
+                                        onRemoteSwitchCamera: cam != null
+                                            ? () => ctrl
+                                                .remoteSwitchCamera(cam.id)
+                                            : null,
+                                        onRemoteToggleTorch: cam != null
+                                            ? () =>
+                                                ctrl.remoteToggleTorch(cam.id)
+                                            : null,
+                                        onRemoteSelectQuality: cam != null
+                                            ? (q) => ctrl.remoteSetQuality(
+                                                cam.id, q)
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     if (ctrl.showPautaPanel) ...[
                       const SizedBox(width: 8),
                       const Expanded(
-                        flex: 32,
+                        flex: 33,
                         child: MediaPautaPanel(),
                       ),
                     ],
                   ],
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Cuadrícula inferior para hasta 4 cámaras simultáneas (~34%)
-              Expanded(
-                flex: 34,
-                child: Row(
-                  children: List.generate(
-                    NetworkConstants.maxConnectedCameras,
-                    (index) {
-                      final cam = ctrl.slots[index];
-                      final isLive = cam != null &&
-                          !ctrl.isPlayingLocalVideo &&
-                          cam.id == ctrl.activeLiveCameraId;
-                      final isPreview = ctrl.studioMode &&
-                          cam != null &&
-                          !isLive &&
-                          cam.id == ctrl.previewCameraId;
-
-                      return Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(
-                            left: index == 0 ? 0 : 5,
-                            right: index ==
-                                    NetworkConstants.maxConnectedCameras - 1
-                                ? 0
-                                : 5,
-                          ),
-                          child: CameraSlotTile(
-                            slotIndex: index,
-                            camera: cam,
-                            isLive: isLive,
-                            isPreview: isPreview,
-                            isAudioActive:
-                                cam != null && ctrl.isCameraAudioActive(cam),
-                            showTelemetry: ctrl.showTelemetry,
-                            onTap: cam != null
-                                ? () => ctrl.onSlotTapped(cam.id)
-                                : null,
-                            onAddCameraTap: () => _showQrDialog(context, ctrl),
-                            onToggleMute: cam != null
-                                ? () => ctrl.toggleCameraMute(cam.id)
-                                : null,
-                            onRemoteSwitchCamera: cam != null
-                                ? () => ctrl.remoteSwitchCamera(cam.id)
-                                : null,
-                            onRemoteToggleTorch: cam != null
-                                ? () => ctrl.remoteToggleTorch(cam.id)
-                                : null,
-                            onRemoteSelectQuality: cam != null
-                                ? (q) => ctrl.remoteSetQuality(cam.id, q)
-                                : null,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
                 ),
               ),
             ],

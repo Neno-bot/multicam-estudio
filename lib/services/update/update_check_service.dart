@@ -37,17 +37,7 @@ class UpdateCheckService {
       final releaseName = (json['name'] as String?) ?? '';
       final assets = (json['assets'] as List?) ?? const [];
 
-      String downloadUrl = AppConstants.directArm64ApkUrl;
-      for (final asset in assets) {
-        if (asset is Map<String, dynamic>) {
-          final name = (asset['name'] as String?) ?? '';
-          if (name.toLowerCase().contains('arm64') && name.endsWith('.apk')) {
-            downloadUrl =
-                (asset['browser_download_url'] as String?) ?? downloadUrl;
-            break;
-          }
-        }
-      }
+      final downloadUrl = selectBestArm64AssetUrl(assets);
 
       final extracted = extractVersion(releaseName) ?? AppConstants.appVersion;
       final isNewer = isVersionNewer(extracted, AppConstants.appVersion);
@@ -63,6 +53,25 @@ class UpdateCheckService {
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// Prioriza siempre el APK arm64 de NenoCam Studio sobre archivos heredados
+  static String selectBestArm64AssetUrl(List<dynamic> assets) {
+    String? fallbackArm64;
+    for (final asset in assets) {
+      if (asset is Map<String, dynamic>) {
+        final name = ((asset['name'] as String?) ?? '').toLowerCase();
+        final url = asset['browser_download_url'] as String?;
+        if (url == null || url.isEmpty) continue;
+        if (name.contains('arm64') && name.endsWith('.apk')) {
+          if (name.contains('nenocam')) {
+            return url;
+          }
+          fallbackArm64 ??= url;
+        }
+      }
+    }
+    return fallbackArm64 ?? AppConstants.directArm64ApkUrl;
   }
 
   /// Extrae un número de versión tipo v1.3 o 1.3.0 desde el título del release

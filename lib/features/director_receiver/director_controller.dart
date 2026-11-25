@@ -96,6 +96,12 @@ class DirectorController extends ChangeNotifier {
   bool get isFadingTransition => _isFadingTransition;
   OverlayConfig get overlayConfig => _overlayConfig;
   List<MediaCueItem> get mediaCues => List.unmodifiable(_mediaCues);
+  List<MediaCueItem> get imageCues => _mediaCues
+      .where((c) => c.type == MediaCueType.image)
+      .toList(growable: false);
+  List<MediaCueItem> get videoCues => _mediaCues
+      .where((c) => c.type == MediaCueType.video)
+      .toList(growable: false);
   bool get showPautaPanel => _showPautaPanel;
   ImageOverlayConfig get imageOverlay => _imageOverlay;
   VideoPlayerController? get localVideoController => _localVideoController;
