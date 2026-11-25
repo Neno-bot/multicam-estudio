@@ -67,7 +67,7 @@ class DirectorController extends ChangeNotifier {
   VideoPlayerController? _localVideoController;
   String? _loadedVideoPath;
   bool _isPlayingLocalVideo = false;
-  bool _isLocalVideoLooping = false;
+  bool _isLocalVideoLooping = true;
   bool _isLocalVideoMuted = false;
 
   // Modo Estudio, Telemetría y Modo Pantalla Limpia (para YouTube/Facebook Live)
@@ -457,6 +457,7 @@ class DirectorController extends ChangeNotifier {
         _localVideoController = controller;
         _loadedVideoPath = path;
       } else {
+        await _localVideoController!.setLooping(_isLocalVideoLooping);
         await _localVideoController!.seekTo(Duration.zero);
       }
 
