@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:image_picker/image_picker.dart';
@@ -13,6 +14,7 @@ import '../../core/models/camera_node.dart';
 import '../../core/models/media_cue_item.dart';
 import '../../core/models/media_overlay_config.dart';
 import '../../core/models/overlay_config.dart';
+import '../../core/models/overlay_layer_item.dart';
 import '../../core/models/signaling_message.dart';
 import '../../core/models/video_quality_profile.dart';
 import '../../services/discovery/local_discovery_service.dart';
@@ -20,6 +22,8 @@ import '../../services/recording/program_recorder_service.dart';
 import '../../services/signaling/director_signaling_server.dart';
 import '../../services/streaming/rtmp_stream_service.dart';
 import '../../services/webrtc/director_webrtc_service.dart';
+
+enum DirectorSideTab { pauta, overlays }
 
 class DirectorController extends ChangeNotifier {
   final LocalDiscoveryService _discovery = LocalDiscoveryService();
@@ -54,13 +58,21 @@ class DirectorController extends ChangeNotifier {
   bool _isFadingTransition = false;
   OverlayConfig _overlayConfig = const OverlayConfig();
 
-  // v1.3: Bandeja de Pauta Switcher (Múltiples imágenes + videos a la palma de la mano)
+  // v1.3-v1.4: Bandeja de Pauta Switcher (Múltiples imágenes + videos a la palma de la mano)
   final List<MediaCueItem> _mediaCues = [];
   String? _activeProgramCueId; // Placa pantalla completa o Video activo
   String? _activeLogoCueId; // Logo en esquina activo sobre cámaras
   bool _showPautaPanel = true;
+  DirectorSideTab _sideTab = DirectorSideTab.pauta;
   int _imgCounter = 0;
   int _vidCounter = 0;
+
+  // v1.5: Sistema independiente de Capas / Overlays (Downstream Keyer)
+  // Totalmente separado de Pauta Media (+IMG/+VID), Cámaras (CAM 1-4) y Audio en vivo
+  final List<OverlayLayerItem> _overlayLayers = [];
+  final Map<String, VideoPlayerController> _overlayVideoControllers = {};
+  WatermarkConfig _watermarkConfig = const WatermarkConfig();
+  int _overlayCounter = 0;
 
   // Imágenes y Videos en la transmisión
   ImageOverlayConfig _imageOverlay = const ImageOverlayConfig();
@@ -103,6 +115,14 @@ class DirectorController extends ChangeNotifier {
       .where((c) => c.type == MediaCueType.video)
       .toList(growable: false);
   bool get showPautaPanel => _showPautaPanel;
+  DirectorSideTab get sideTab => _sideTab;
+  List<OverlayLayerItem> get overlayLayers => List.unmodifiable(_overlayLayers);
+  WatermarkConfig get watermarkConfig => _watermarkConfig;
+  int get activeOverlayCount =>
+      _overlayLayers.where((o) => o.isActive).length +
+      (_watermarkConfig.isVisible && _watermarkConfig.hasImage ? 1 : 0);
+  VideoPlayerController? overlayVideoControllerFor(String overlayId) =>
+      _overlayVideoControllers[overlayId];
   ImageOverlayConfig get imageOverlay => _imageOverlay;
   VideoPlayerController? get localVideoController => _localVideoController;
   bool get hasLocalVideo =>
@@ -253,6 +273,195 @@ class DirectorController extends ChangeNotifier {
 
   void togglePautaPanel() {
     _showPautaPanel = !_showPautaPanel;
+    _safeNotify();
+  }
+
+  void setSideTab(DirectorSideTab tab) {
+    _sideTab = tab;
+    _showPautaPanel = true;
+    _safeNotify();
+  }
+
+  void openOverlaysTab() {
+    if (_showPautaPanel && _sideTab == DirectorSideTab.overlays) {
+      _showPautaPanel = false;
+    } else {
+      _sideTab = DirectorSideTab.overlays;
+      _showPautaPanel = true;
+    }
+    _safeNotify();
+  }
+
+  // ---- v1.5: CAPAS / OVERLAYS INDEPENDIENTES (DOWNSTREAM KEYER) ----
+  // Activar/desactivar/cambiar aquí NUNCA detiene cámaras, pauta ni audio en vivo.
+
+  Future<void> addOverlayTemplates() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'gif', 'webp', 'webm'],
+        allowMultiple: true,
+      );
+      if (result == null || result.files.isEmpty || _isDisposed) return;
+
+      for (final file in result.files) {
+        final path = file.path;
+        if (path == null || path.isEmpty) continue;
+        _overlayCounter++;
+        final format = OverlayMediaFormat.fromPath(path);
+        final rawName = file.name.trim();
+        final dotIdx = rawName.lastIndexOf('.');
+        final cleanName = dotIdx > 0 ? rawName.substring(0, dotIdx) : rawName;
+
+        _overlayLayers.add(
+          OverlayLayerItem(
+            id: _uuid.v4(),
+            name: cleanName.isNotEmpty ? cleanName : 'Plantilla $_overlayCounter',
+            filePath: path,
+            format: format,
+            isActive: false,
+            opacity: 1.0,
+            position: OverlayPosition.fullscreen,
+          ),
+        );
+      }
+
+      _sideTab = DirectorSideTab.overlays;
+      _showPautaPanel = true;
+      _safeNotify();
+    } catch (e) {
+      _lastError = 'No se pudo cargar la plantilla overlay: $e';
+      _safeNotify();
+    }
+  }
+
+  /// Interruptor individual ON/OFF con transición suave de opacidad (fade).
+  /// Totalmente independiente de la cámara activa, pauta media y audio.
+  Future<void> toggleOverlayLayer(String overlayId, bool active) async {
+    final idx = _overlayLayers.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final item = _overlayLayers[idx];
+
+    if (item.format.isVideo) {
+      if (active) {
+        try {
+          var vc = _overlayVideoControllers[overlayId];
+          if (vc == null) {
+            vc = VideoPlayerController.file(File(item.filePath));
+            await vc.initialize();
+            if (_isDisposed) {
+              await vc.dispose();
+              return;
+            }
+            await vc.setLooping(true);
+            await vc.setVolume(0.0); // No interrumpe el audio en vivo
+            _overlayVideoControllers[overlayId] = vc;
+          } else {
+            await vc.seekTo(Duration.zero);
+          }
+          await vc.play();
+        } catch (e) {
+          _lastError = 'No se pudo reproducir overlay WebM: $e';
+          _safeNotify();
+          return;
+        }
+      } else {
+        await _overlayVideoControllers[overlayId]?.pause();
+      }
+    }
+
+    if (_isDisposed) return;
+    final currentIdx = _overlayLayers.indexWhere((o) => o.id == overlayId);
+    if (currentIdx == -1) return;
+    _overlayLayers[currentIdx] =
+        _overlayLayers[currentIdx].copyWith(isActive: active);
+    _safeNotify();
+  }
+
+  void setOverlayOpacity(String overlayId, double opacity) {
+    final idx = _overlayLayers.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    _overlayLayers[idx] =
+        _overlayLayers[idx].copyWith(opacity: opacity.clamp(0.1, 1.0));
+    _safeNotify();
+  }
+
+  void cycleOverlayPosition(String overlayId) {
+    final idx = _overlayLayers.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final nextPos = switch (_overlayLayers[idx].position) {
+      OverlayPosition.fullscreen => OverlayPosition.bottom,
+      OverlayPosition.bottom => OverlayPosition.top,
+      OverlayPosition.top => OverlayPosition.fullscreen,
+    };
+    _overlayLayers[idx] = _overlayLayers[idx].copyWith(position: nextPos);
+    _safeNotify();
+  }
+
+  Future<void> removeOverlayLayer(String overlayId) async {
+    _overlayLayers.removeWhere((o) => o.id == overlayId);
+    final vc = _overlayVideoControllers.remove(overlayId);
+    await vc?.dispose();
+    _safeNotify();
+  }
+
+  // ---- SLOT FIJO: MARCA DE AGUA / LOGO (NIVEL SUPERIOR) ----
+
+  Future<void> pickWatermarkImage() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'webp', 'gif'],
+        allowMultiple: false,
+      );
+      final path = (result != null && result.files.isNotEmpty)
+          ? result.files.first.path
+          : null;
+      if (path == null || path.isEmpty || _isDisposed) return;
+
+      _watermarkConfig = _watermarkConfig.copyWith(
+        filePath: path,
+        isVisible: true,
+      );
+      _sideTab = DirectorSideTab.overlays;
+      _showPautaPanel = true;
+      _safeNotify();
+    } catch (e) {
+      _lastError = 'No se pudo cargar la marca de agua: $e';
+      _safeNotify();
+    }
+  }
+
+  void setWatermarkVisible(bool visible) {
+    if (!_watermarkConfig.hasImage) return;
+    _watermarkConfig = _watermarkConfig.copyWith(isVisible: visible);
+    _safeNotify();
+  }
+
+  void setWatermarkOpacity(double opacity) {
+    _watermarkConfig =
+        _watermarkConfig.copyWith(opacity: opacity.clamp(0.15, 1.0));
+    _safeNotify();
+  }
+
+  void setWatermarkScale(double scale) {
+    _watermarkConfig = _watermarkConfig.copyWith(scale: scale.clamp(0.08, 0.35));
+    _safeNotify();
+  }
+
+  void cycleWatermarkCorner() {
+    final next = switch (_watermarkConfig.corner) {
+      WatermarkCorner.topRight => WatermarkCorner.topLeft,
+      WatermarkCorner.topLeft => WatermarkCorner.bottomLeft,
+      WatermarkCorner.bottomLeft => WatermarkCorner.bottomRight,
+      WatermarkCorner.bottomRight => WatermarkCorner.topRight,
+    };
+    _watermarkConfig = _watermarkConfig.copyWith(corner: next);
+    _safeNotify();
+  }
+
+  void clearWatermark() {
+    _watermarkConfig = const WatermarkConfig();
     _safeNotify();
   }
 
@@ -1019,6 +1228,10 @@ class DirectorController extends ChangeNotifier {
       _rtmpService.stopStream();
     }
     _disposeLocalVideo();
+    for (final vc in _overlayVideoControllers.values) {
+      vc.dispose();
+    }
+    _overlayVideoControllers.clear();
     _telemetryTimer?.cancel();
     _recordingTimer?.cancel();
     _recorder.dispose();

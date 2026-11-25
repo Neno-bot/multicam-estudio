@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/models/camera_node.dart';
 import '../../../core/models/media_overlay_config.dart';
 import '../../../core/models/overlay_config.dart';
+import '../../../core/models/overlay_layer_item.dart';
 import '../../../core/models/stream_stats.dart';
 
 class LiveProgramMonitor extends StatelessWidget {
@@ -16,6 +17,10 @@ class LiveProgramMonitor extends StatelessWidget {
   final bool isFadingTransition;
   final OverlayConfig overlayConfig;
   final ImageOverlayConfig imageOverlay;
+  final List<OverlayLayerItem> overlayLayers;
+  final VideoPlayerController? Function(String overlayId)?
+      overlayVideoControllerFor;
+  final WatermarkConfig watermarkConfig;
   final VideoPlayerController? localVideoController;
   final bool isPlayingLocalVideo;
   final bool isRecording;
@@ -39,6 +44,9 @@ class LiveProgramMonitor extends StatelessWidget {
     required this.isRtmpLive,
     required this.rtmpBitrateKbps,
     required this.showTelemetry,
+    this.overlayLayers = const [],
+    this.overlayVideoControllerFor,
+    this.watermarkConfig = const WatermarkConfig(),
     this.cleanMode = false,
   });
 
@@ -93,11 +101,14 @@ class LiveProgramMonitor extends StatelessWidget {
         builder: (context, constraints) {
           final logoWidth =
               (constraints.maxWidth * imageOverlay.sizeFactor).clamp(64.0, 260.0);
+          final watermarkWidth =
+              (constraints.maxWidth * watermarkConfig.scale).clamp(48.0, 280.0);
+          final watermarkTopOffset = cleanMode ? 16.0 : 48.0;
 
           return Stack(
             fit: StackFit.expand,
             children: [
-              // 1. Capa base: Video local MP4 o Cámara WebRTC en vivo
+              // === NIVEL 1 (BASE): Cámara activa o Video/Placa de Pauta Media ===
               if (hasVideoFeed)
                 Center(
                   child: AspectRatio(
@@ -134,7 +145,7 @@ class LiveProgramMonitor extends StatelessWidget {
                   ],
                 ),
 
-              // 2. Capa de Imagen a Pantalla Completa (Slide / Placa)
+              // Placa a pantalla completa de Pauta Media (Nivel Base)
               if (hasFullscreenImage)
                 Container(
                   color: Colors.black,
@@ -146,7 +157,53 @@ class LiveProgramMonitor extends StatelessWidget {
                   ),
                 ),
 
-              // 3. Capa de Logo en Esquina (superior izquierda o derecha)
+              // Cortina FADE del Nivel Base (las capas DSK y Marca de Agua permanecen firmes encima)
+              IgnorePointer(
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 160),
+                  opacity: isFadingTransition ? 1.0 : 0.0,
+                  child: Container(color: Colors.black),
+                ),
+              ),
+
+              // === NIVEL 2 (MEDIO — DOWNSTREAM KEYER): Plantillas / Cintillos con transparencia ===
+              ...overlayLayers.map((layer) {
+                final vc = layer.format.isVideo
+                    ? overlayVideoControllerFor?.call(layer.id)
+                    : null;
+                final canRender = !layer.format.isVideo ||
+                    (vc != null && vc.value.isInitialized);
+
+                return IgnorePointer(
+                  key: ValueKey('dsk_${layer.id}'),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 240),
+                    curve: Curves.easeInOut,
+                    opacity: (layer.isActive && canRender) ? layer.opacity : 0.0,
+                    child: Align(
+                      alignment: layer.position.alignment,
+                      child: layer.format.isVideo
+                          ? (vc != null && vc.value.isInitialized
+                              ? AspectRatio(
+                                  aspectRatio: vc.value.aspectRatio > 0
+                                      ? vc.value.aspectRatio
+                                      : 16 / 9,
+                                  child: VideoPlayer(vc),
+                                )
+                              : const SizedBox.shrink())
+                          : Image.file(
+                              File(layer.filePath),
+                              fit: BoxFit.contain,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, __, ___) =>
+                                  const SizedBox.shrink(),
+                            ),
+                    ),
+                  ),
+                );
+              }),
+
+              // Logo de esquina rápido desde Pauta (compatibilidad)
               if (hasCornerLogo)
                 Positioned(
                   top: cleanMode ? 18 : 54,
@@ -170,16 +227,7 @@ class LiveProgramMonitor extends StatelessWidget {
                   ),
                 ),
 
-              // 4. Cortina suave para transición FADE
-              IgnorePointer(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 160),
-                  opacity: isFadingTransition ? 1.0 : 0.0,
-                  child: Container(color: Colors.black),
-                ),
-              ),
-
-              // 5. Overlay Lower Third (visible incluso en Modo Limpio para YouTube/Facebook)
+              // Rótulo de texto Lower Third (Nivel Medio)
               Positioned(
                 left: 18,
                 bottom: 18,
@@ -240,6 +288,48 @@ class LiveProgramMonitor extends StatelessWidget {
                   ),
                 ),
               ),
+
+              // === NIVEL 3 (SUPERIOR): Marca de Agua / Logo fija con opacidad y escala ===
+              if (watermarkConfig.hasImage)
+                Positioned(
+                  top: (watermarkConfig.corner == WatermarkCorner.topRight ||
+                          watermarkConfig.corner == WatermarkCorner.topLeft)
+                      ? watermarkTopOffset
+                      : null,
+                  bottom:
+                      (watermarkConfig.corner == WatermarkCorner.bottomRight ||
+                              watermarkConfig.corner ==
+                                  WatermarkCorner.bottomLeft)
+                          ? 16.0
+                          : null,
+                  right: (watermarkConfig.corner == WatermarkCorner.topRight ||
+                          watermarkConfig.corner ==
+                              WatermarkCorner.bottomRight)
+                      ? 16.0
+                      : null,
+                  left: (watermarkConfig.corner == WatermarkCorner.topLeft ||
+                          watermarkConfig.corner == WatermarkCorner.bottomLeft)
+                      ? 16.0
+                      : null,
+                  child: IgnorePointer(
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 240),
+                      curve: Curves.easeInOut,
+                      opacity: watermarkConfig.isVisible
+                          ? watermarkConfig.opacity
+                          : 0.0,
+                      child: SizedBox(
+                        width: watermarkWidth,
+                        child: Image.file(
+                          File(watermarkConfig.filePath!),
+                          fit: BoxFit.contain,
+                          gaplessPlayback: true,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
 
               // 6. Badges técnicos del Director (ocultos en Clean Broadcast Mode)
               if (!cleanMode) ...[

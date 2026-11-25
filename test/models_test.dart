@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:multicam_studio/core/models/media_cue_item.dart';
 import 'package:multicam_studio/core/models/media_overlay_config.dart';
 import 'package:multicam_studio/core/models/overlay_config.dart';
+import 'package:multicam_studio/core/models/overlay_layer_item.dart';
 import 'package:multicam_studio/core/models/signaling_message.dart';
 import 'package:multicam_studio/core/models/stream_stats.dart';
 import 'package:multicam_studio/core/models/video_quality_profile.dart';
@@ -115,6 +116,36 @@ void main() {
         imagePlacement: ImageOverlayPlacement.topRightLogo,
       );
       expect(logo.isCornerLogo, true);
+    });
+  });
+
+  group('OverlayLayerItem & WatermarkConfig', () {
+    test('detecta formatos con transparencia y conserva propiedades en copyWith', () {
+      expect(OverlayMediaFormat.fromPath('/tmp/cintillo.png'),
+          OverlayMediaFormat.png);
+      expect(OverlayMediaFormat.fromPath('/tmp/animado.GIF'),
+          OverlayMediaFormat.gif);
+      expect(OverlayMediaFormat.fromPath('/tmp/banner.webp'),
+          OverlayMediaFormat.webp);
+      expect(OverlayMediaFormat.fromPath('/tmp/alerta.webm'),
+          OverlayMediaFormat.webm);
+      expect(OverlayMediaFormat.webm.isVideo, true);
+
+      const item = OverlayLayerItem(
+        id: 'ov-1',
+        name: 'Cintillo Alerta',
+        filePath: '/tmp/cintillo.png',
+        format: OverlayMediaFormat.png,
+      );
+      final live = item.copyWith(isActive: true, opacity: 0.85);
+      expect(live.isActive, true);
+      expect(live.opacity, 0.85);
+      expect(live.name, 'Cintillo Alerta');
+
+      const wm = WatermarkConfig(filePath: '/tmp/logo.png', isVisible: true);
+      expect(wm.hasImage, true);
+      expect(wm.corner, WatermarkCorner.topRight);
+      expect(wm.copyWith(clearFile: true).hasImage, false);
     });
   });
 }

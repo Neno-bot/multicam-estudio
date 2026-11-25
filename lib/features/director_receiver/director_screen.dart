@@ -152,6 +152,9 @@ class _DirectorView extends StatelessWidget {
       isFadingTransition: ctrl.isFadingTransition,
       overlayConfig: ctrl.overlayConfig,
       imageOverlay: ctrl.imageOverlay,
+      overlayLayers: ctrl.overlayLayers,
+      overlayVideoControllerFor: ctrl.overlayVideoControllerFor,
+      watermarkConfig: ctrl.watermarkConfig,
       localVideoController: ctrl.localVideoController,
       isPlayingLocalVideo: ctrl.isPlayingLocalVideo,
       isRecording: ctrl.isRecording,
@@ -322,8 +325,28 @@ class _DirectorView extends StatelessWidget {
                               icon: Icons.dashboard_customize_rounded,
                               label: 'PAUTA (${ctrl.mediaCues.length})',
                               color: const Color(0xFF3B82F6),
-                              highlighted: ctrl.showPautaPanel,
-                              onTap: ctrl.togglePautaPanel,
+                              highlighted: ctrl.showPautaPanel &&
+                                  ctrl.sideTab == DirectorSideTab.pauta,
+                              onTap: () {
+                                if (ctrl.showPautaPanel &&
+                                    ctrl.sideTab == DirectorSideTab.pauta) {
+                                  ctrl.togglePautaPanel();
+                                } else {
+                                  ctrl.setSideTab(DirectorSideTab.pauta);
+                                }
+                              },
+                            ),
+                            const SizedBox(width: 7),
+                            _ActionChip(
+                              icon: Icons.layers_rounded,
+                              label: ctrl.activeOverlayCount > 0
+                                  ? 'CAPAS (${ctrl.activeOverlayCount} ON)'
+                                  : 'CAPAS',
+                              color: const Color(0xFF22C55E),
+                              highlighted: ctrl.activeOverlayCount > 0 ||
+                                  (ctrl.showPautaPanel &&
+                                      ctrl.sideTab == DirectorSideTab.overlays),
+                              onTap: ctrl.openOverlaysTab,
                             ),
                             const SizedBox(width: 7),
                             _ActionChip(

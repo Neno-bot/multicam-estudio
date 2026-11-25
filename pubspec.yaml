@@ -1,7 +1,7 @@
 name: multicam_studio
 description: NenoCam Studio — Aplicación multicámara de producción en vivo con YouTube/Facebook Live, imágenes y videos.
 publish_to: 'none'
-version: 1.4.0+5
+version: 1.5.0+6
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -36,8 +36,9 @@ dependencies:
   mobile_scanner: ^5.2.3
   path_provider: ^2.1.4
 
-  # v1.2: Imágenes, videos locales y enlaces de actualización
+  # v1.2-v1.5: Imágenes, videos locales, overlays PNG/GIF/WebM y actualizaciones
   image_picker: ^1.1.2
+  file_picker: ^8.1.4
   video_player: ^2.9.2
   url_launcher: ^6.3.1
 

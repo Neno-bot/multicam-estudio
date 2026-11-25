@@ -6,58 +6,191 @@ import 'package:provider/provider.dart';
 import '../../../core/models/media_cue_item.dart';
 import '../../../core/models/media_overlay_config.dart';
 import '../director_controller.dart';
+import 'overlay_layers_panel.dart';
 
-/// Columna derecha dividida en 2 cuadros independientes y deslizables:
-/// - Cuadro superior: IMÁGENES (multi-selección + 1 toque CUT/FADE)
-/// - Cuadro inferior: VIDEOS (1 toque CUT/FADE + controles de reproducción)
+/// Columna derecha con pestañas independientes:
+/// - PAUTA MEDIA: dos cuadros separados y deslizables (IMÁGENES arriba + VIDEOS abajo)
+/// - CAPAS / OVERLAYS: Downstream Keyer independiente (Marca de Agua fija + Plantillas PNG/GIF/WebM)
 class MediaPautaPanel extends StatelessWidget {
   const MediaPautaPanel({super.key});
 
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<DirectorController>();
+    final isOverlaysTab = ctrl.sideTab == DirectorSideTab.overlays;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          flex: 54,
-          child: _MediaSectionBox(
-            title: 'IMÁGENES',
-            icon: Icons.photo_library_rounded,
-            accentColor: const Color(0xFF3B82F6),
-            addLabel: '+IMG',
-            addIcon: Icons.add_photo_alternate_rounded,
-            emptyHint: 'Toca +IMG para\nelegir varias fotos',
-            cues: ctrl.imageCues,
-            onAdd: ctrl.addImagesToPauta,
-            isCueActive: ctrl.isCueActive,
-            onTriggerCue: ctrl.triggerMediaCue,
-            onCyclePlacement: ctrl.cycleCueImagePlacement,
-            onRemoveCue: ctrl.removeMediaCue,
+        // Selector superior de pestaña: PAUTA MEDIA | CAPAS / OVERLAYS
+        Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF111621),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _SideTabPill(
+                  icon: Icons.dashboard_customize_rounded,
+                  label: 'PAUTA',
+                  badgeCount: ctrl.mediaCues.length,
+                  selected: !isOverlaysTab,
+                  accentColor: const Color(0xFF3B82F6),
+                  onTap: () => ctrl.setSideTab(DirectorSideTab.pauta),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: _SideTabPill(
+                  icon: Icons.layers_rounded,
+                  label: 'CAPAS',
+                  badgeCount: ctrl.activeOverlayCount,
+                  badgeLive: ctrl.activeOverlayCount > 0,
+                  selected: isOverlaysTab,
+                  accentColor: const Color(0xFF22C55E),
+                  onTap: () => ctrl.setSideTab(DirectorSideTab.overlays),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+
         Expanded(
-          flex: 46,
-          child: _MediaSectionBox(
-            title: 'VIDEOS',
-            icon: Icons.video_library_rounded,
-            accentColor: const Color(0xFFA855F7),
-            addLabel: '+VID',
-            addIcon: Icons.video_call_rounded,
-            emptyHint: 'Toca +VID para\nagregar videos',
-            cues: ctrl.videoCues,
-            onAdd: ctrl.addVideoToPauta,
-            isCueActive: ctrl.isCueActive,
-            onTriggerCue: ctrl.triggerMediaCue,
-            onRemoveCue: ctrl.removeMediaCue,
-            footer: ctrl.isPlayingLocalVideo
-                ? _VideoTransportBar(ctrl: ctrl)
-                : null,
-          ),
+          child: isOverlaysTab
+              ? const OverlayLayersPanel()
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      flex: 54,
+                      child: _MediaSectionBox(
+                        title: 'IMÁGENES',
+                        icon: Icons.photo_library_rounded,
+                        accentColor: const Color(0xFF3B82F6),
+                        addLabel: '+IMG',
+                        addIcon: Icons.add_photo_alternate_rounded,
+                        emptyHint: 'Toca +IMG para\nelegir varias fotos',
+                        cues: ctrl.imageCues,
+                        onAdd: ctrl.addImagesToPauta,
+                        isCueActive: ctrl.isCueActive,
+                        onTriggerCue: ctrl.triggerMediaCue,
+                        onCyclePlacement: ctrl.cycleCueImagePlacement,
+                        onRemoveCue: ctrl.removeMediaCue,
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    Expanded(
+                      flex: 46,
+                      child: _MediaSectionBox(
+                        title: 'VIDEOS',
+                        icon: Icons.video_library_rounded,
+                        accentColor: const Color(0xFFA855F7),
+                        addLabel: '+VID',
+                        addIcon: Icons.video_call_rounded,
+                        emptyHint: 'Toca +VID para\nagregar videos',
+                        cues: ctrl.videoCues,
+                        onAdd: ctrl.addVideoToPauta,
+                        isCueActive: ctrl.isCueActive,
+                        onTriggerCue: ctrl.triggerMediaCue,
+                        onRemoveCue: ctrl.removeMediaCue,
+                        footer: ctrl.isPlayingLocalVideo
+                            ? _VideoTransportBar(ctrl: ctrl)
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
         ),
       ],
+    );
+  }
+}
+
+class _SideTabPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int badgeCount;
+  final bool badgeLive;
+  final bool selected;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  const _SideTabPill({
+    required this.icon,
+    required this.label,
+    required this.badgeCount,
+    required this.selected,
+    required this.accentColor,
+    required this.onTap,
+    this.badgeLive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? accentColor.withAlpha(56) : Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected ? accentColor.withAlpha(180) : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 12.5,
+                color: selected ? Colors.white : Colors.white60,
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: selected ? Colors.white : Colors.white60,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              if (badgeCount > 0) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: badgeLive ? const Color(0xFF22C55E) : Colors.white12,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$badgeCount',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w900,
+                      color: badgeLive ? Colors.black : Colors.white70,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

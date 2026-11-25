@@ -188,6 +188,8 @@ jobs:
           -dontwarn fr.skyost.bonsoir.**
           -keep class com.baseflow.permissionhandler.** { *; }
           -keep class dev.fluttercommunity.plus.** { *; }
+          -keep class com.mr.flutter.plugin.filepicker.** { *; }
+          -dontwarn com.mr.flutter.plugin.filepicker.**
           EOF
 
       - name: Instalar dependencias Flutter
@@ -237,8 +239,8 @@ jobs:
             gh release delete-asset latest-android-test MultiCam-Studio-arm64.apk --yes >/dev/null 2>&1 || true
             gh release delete-asset latest-android-test MultiCam-Studio-armv7.apk --yes >/dev/null 2>&1 || true
             gh release edit latest-android-test \
-              --title "NenoCam Studio v1.4.0 (Secciones Separadas: Imágenes + Videos + Cámaras Compactas)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora con secciones independientes y deslizables de IMÁGENES arriba y VIDEOS abajo junto a las 4 cámaras compactas." \
+              --title "NenoCam Studio v1.5.0 (Capas / Overlays Independientes + Marca de Agua + Fix QR)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Incluye sistema independiente CAPAS / OVERLAYS (Downstream Keyer para PNG/GIF/WebP/WebM con transparencia y Marca de Agua fija con opacidad/escala) y código QR completo en horizontal." \
               --latest
             gh release upload latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
@@ -248,7 +250,7 @@ jobs:
             gh release create latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
               build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
-              --title "NenoCam Studio v1.4.0 (Secciones Separadas: Imágenes + Videos + Cámaras Compactas)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora con secciones independientes y deslizables de IMÁGENES arriba y VIDEOS abajo junto a las 4 cámaras compactas." \
+              --title "NenoCam Studio v1.5.0 (Capas / Overlays Independientes + Marca de Agua + Fix QR)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Incluye sistema independiente CAPAS / OVERLAYS (Downstream Keyer para PNG/GIF/WebP/WebM con transparencia y Marca de Agua fija con opacidad/escala) y código QR completo en horizontal." \
               --latest
           fi
