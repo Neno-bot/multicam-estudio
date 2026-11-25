@@ -4,11 +4,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/constants/network_constants.dart';
 import '../../core/models/camera_node.dart';
+import '../../core/models/media_cue_item.dart';
 import '../../core/models/media_overlay_config.dart';
 import '../../core/models/overlay_config.dart';
 import '../../core/models/signaling_message.dart';
@@ -26,6 +28,7 @@ class DirectorController extends ChangeNotifier {
   final ProgramRecorderService _recorder = ProgramRecorderService();
   final RtmpStreamService _rtmpService = RtmpStreamService();
   final ImagePicker _imagePicker = ImagePicker();
+  final Uuid _uuid = const Uuid();
 
   /// Renderer exclusivo del Monitor Principal EN VIVO (PGM)
   final RTCVideoRenderer programRenderer = RTCVideoRenderer();
@@ -47,13 +50,22 @@ class DirectorController extends ChangeNotifier {
 
   // Audio: SOLO TABLET por defecto (teléfonos emisores silenciados)
   AudioMixMode _audioMixMode = AudioMixMode.tabletOnly;
-  TransitionMode _transitionMode = TransitionMode.cut;
+  TransitionMode _transitionMode = TransitionMode.fade;
   bool _isFadingTransition = false;
   OverlayConfig _overlayConfig = const OverlayConfig();
+
+  // v1.3: Bandeja de Pauta Switcher (Múltiples imágenes + videos a la palma de la mano)
+  final List<MediaCueItem> _mediaCues = [];
+  String? _activeProgramCueId; // Placa pantalla completa o Video activo
+  String? _activeLogoCueId; // Logo en esquina activo sobre cámaras
+  bool _showPautaPanel = true;
+  int _imgCounter = 0;
+  int _vidCounter = 0;
 
   // Imágenes y Videos en la transmisión
   ImageOverlayConfig _imageOverlay = const ImageOverlayConfig();
   VideoPlayerController? _localVideoController;
+  String? _loadedVideoPath;
   bool _isPlayingLocalVideo = false;
   bool _isLocalVideoLooping = false;
   bool _isLocalVideoMuted = false;
@@ -83,6 +95,8 @@ class DirectorController extends ChangeNotifier {
   TransitionMode get transitionMode => _transitionMode;
   bool get isFadingTransition => _isFadingTransition;
   OverlayConfig get overlayConfig => _overlayConfig;
+  List<MediaCueItem> get mediaCues => List.unmodifiable(_mediaCues);
+  bool get showPautaPanel => _showPautaPanel;
   ImageOverlayConfig get imageOverlay => _imageOverlay;
   VideoPlayerController? get localVideoController => _localVideoController;
   bool get hasLocalVideo =>
@@ -116,6 +130,9 @@ class DirectorController extends ChangeNotifier {
       previewCamera != null &&
       previewCamera!.stream != null &&
       previewCamera!.id != _activeLiveCameraId;
+
+  bool isCueActive(String cueId) =>
+      cueId == _activeProgramCueId || cueId == _activeLogoCueId;
 
   String get audioModeLabel {
     switch (_audioMixMode) {
@@ -204,6 +221,251 @@ class DirectorController extends ChangeNotifier {
     });
   }
 
+  // ---- HELPER TRANSICIÓN CUT / FADE (CÁMARAS, IMÁGENES Y VIDEOS) ----
+
+  Future<void> _runWithTransition(Future<void> Function() applyChange) async {
+    if (_transitionMode == TransitionMode.fade) {
+      _isFadingTransition = true;
+      _safeNotify();
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (_isDisposed) return;
+    }
+
+    await applyChange();
+    if (_isDisposed) return;
+
+    if (_isFadingTransition) {
+      _safeNotify();
+      await Future.delayed(const Duration(milliseconds: 45));
+      if (_isDisposed) return;
+      _isFadingTransition = false;
+    }
+    _safeNotify();
+  }
+
+  // ---- v1.3: PAUTA MEDIA SWITCHER (MÚLTIPLES IMÁGENES Y VIDEOS EN 1 TOQUE) ----
+
+  void togglePautaPanel() {
+    _showPautaPanel = !_showPautaPanel;
+    _safeNotify();
+  }
+
+  /// Permite seleccionar varias imágenes a la vez (ej: 4 placas) y dejarlas pautadas
+  Future<void> addImagesToPauta() async {
+    try {
+      final pickedList = await _imagePicker.pickMultiImage();
+      if (pickedList.isEmpty || _isDisposed) return;
+
+      for (final file in pickedList) {
+        _imgCounter++;
+        _mediaCues.add(
+          MediaCueItem(
+            id: _uuid.v4(),
+            label: 'IMG $_imgCounter',
+            filePath: file.path,
+            type: MediaCueType.image,
+            imagePlacement: ImageOverlayPlacement.fullscreenSlide,
+          ),
+        );
+      }
+      _showPautaPanel = true;
+      _safeNotify();
+    } catch (e) {
+      _lastError = 'No se pudieron agregar imágenes: $e';
+      _safeNotify();
+    }
+  }
+
+  /// Añade un video local MP4 a la pauta (listo para lanzar en 1 toque)
+  Future<void> addVideoToPauta() async {
+    try {
+      final picked = await _imagePicker.pickVideo(source: ImageSource.gallery);
+      if (picked == null || _isDisposed) return;
+
+      _vidCounter++;
+      _mediaCues.add(
+        MediaCueItem(
+          id: _uuid.v4(),
+          label: 'VID $_vidCounter',
+          filePath: picked.path,
+          type: MediaCueType.video,
+        ),
+      );
+      _showPautaPanel = true;
+      _safeNotify();
+    } catch (e) {
+      _lastError = 'No se pudo agregar el video: $e';
+      _safeNotify();
+    }
+  }
+
+  /// Lanza al aire o quita un elemento de la Pauta con transición CUT / FADE
+  Future<void> triggerMediaCue(String cueId) async {
+    final idx = _mediaCues.indexWhere((c) => c.id == cueId);
+    if (idx == -1) return;
+    final cue = _mediaCues[idx];
+
+    // 1. Si es Logo en esquina: alternar sin interrumpir video ni cámara
+    if (cue.isCornerLogo) {
+      if (_activeLogoCueId == cue.id) {
+        _activeLogoCueId = null;
+        if (_activeProgramCueId == null ||
+            _findCueById(_activeProgramCueId)?.type != MediaCueType.image) {
+          _imageOverlay = const ImageOverlayConfig();
+        }
+      } else {
+        _activeLogoCueId = cue.id;
+        _imageOverlay = ImageOverlayConfig(
+          filePath: cue.filePath,
+          isVisible: true,
+          placement: cue.imagePlacement,
+          sizeFactor: _imageOverlay.sizeFactor,
+        );
+      }
+      _safeNotify();
+      return;
+    }
+
+    // 2. Si ya estaba activo en pantalla completa -> apagarlo y volver a cámara con transición
+    if (_activeProgramCueId == cue.id) {
+      await _runWithTransition(() async {
+        _activeProgramCueId = null;
+        if (cue.type == MediaCueType.video) {
+          _isPlayingLocalVideo = false;
+          await _localVideoController?.pause();
+        } else {
+          _restoreLogoOrClearImage();
+        }
+      });
+      return;
+    }
+
+    // 3. Activar nueva Placa (Imagen pantalla completa) o Video en vivo con transición
+    if (cue.type == MediaCueType.image) {
+      await _runWithTransition(() async {
+        _activeProgramCueId = cue.id;
+        _isPlayingLocalVideo = false;
+        await _localVideoController?.pause();
+        _imageOverlay = ImageOverlayConfig(
+          filePath: cue.filePath,
+          isVisible: true,
+          placement: ImageOverlayPlacement.fullscreenSlide,
+          sizeFactor: _imageOverlay.sizeFactor,
+        );
+      });
+    } else {
+      await _playVideoFromPathWithTransition(cue.filePath, cueId: cue.id);
+    }
+  }
+
+  /// Cambia una imagen de la pauta entre PLACA completa -> LOGO Der. -> LOGO Izq.
+  void cycleCueImagePlacement(String cueId) {
+    final idx = _mediaCues.indexWhere((c) => c.id == cueId);
+    if (idx == -1) return;
+    final cue = _mediaCues[idx];
+    if (cue.type != MediaCueType.image) return;
+
+    final nextPlacement = switch (cue.imagePlacement) {
+      ImageOverlayPlacement.fullscreenSlide =>
+        ImageOverlayPlacement.topRightLogo,
+      ImageOverlayPlacement.topRightLogo => ImageOverlayPlacement.topLeftLogo,
+      ImageOverlayPlacement.topLeftLogo =>
+        ImageOverlayPlacement.fullscreenSlide,
+    };
+
+    final updated = cue.copyWith(imagePlacement: nextPlacement);
+    _mediaCues[idx] = updated;
+
+    // Actualizar en vivo si ese cue estaba al aire
+    if (_activeProgramCueId == cueId || _activeLogoCueId == cueId) {
+      if (updated.isCornerLogo) {
+        if (_activeProgramCueId == cueId) _activeProgramCueId = null;
+        _activeLogoCueId = cueId;
+      } else {
+        if (_activeLogoCueId == cueId) _activeLogoCueId = null;
+        _activeProgramCueId = cueId;
+      }
+      _imageOverlay = _imageOverlay.copyWith(
+        filePath: updated.filePath,
+        isVisible: true,
+        placement: updated.imagePlacement,
+      );
+    }
+    _safeNotify();
+  }
+
+  Future<void> removeMediaCue(String cueId) async {
+    _mediaCues.removeWhere((c) => c.id == cueId);
+    if (_activeProgramCueId == cueId) {
+      _activeProgramCueId = null;
+      _isPlayingLocalVideo = false;
+      await _localVideoController?.pause();
+      _restoreLogoOrClearImage();
+    }
+    if (_activeLogoCueId == cueId) {
+      _activeLogoCueId = null;
+      if (_activeProgramCueId == null) {
+        _imageOverlay = const ImageOverlayConfig();
+      }
+    }
+    _safeNotify();
+  }
+
+  void _restoreLogoOrClearImage() {
+    final logoCue = _findCueById(_activeLogoCueId);
+    if (logoCue != null) {
+      _imageOverlay = ImageOverlayConfig(
+        filePath: logoCue.filePath,
+        isVisible: true,
+        placement: logoCue.imagePlacement,
+        sizeFactor: _imageOverlay.sizeFactor,
+      );
+    } else {
+      _imageOverlay = const ImageOverlayConfig();
+    }
+  }
+
+  MediaCueItem? _findCueById(String? id) {
+    if (id == null) return null;
+    for (final c in _mediaCues) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
+
+  Future<void> _playVideoFromPathWithTransition(
+    String path, {
+    String? cueId,
+  }) async {
+    try {
+      if (_loadedVideoPath != path || _localVideoController == null) {
+        await _disposeLocalVideo();
+        final controller = VideoPlayerController.file(File(path));
+        await controller.initialize();
+        if (_isDisposed) {
+          await controller.dispose();
+          return;
+        }
+        await controller.setLooping(_isLocalVideoLooping);
+        await controller.setVolume(_isLocalVideoMuted ? 0.0 : 1.0);
+        _localVideoController = controller;
+        _loadedVideoPath = path;
+      } else {
+        await _localVideoController!.seekTo(Duration.zero);
+      }
+
+      await _runWithTransition(() async {
+        _activeProgramCueId = cueId;
+        _restoreLogoOrClearImage();
+        _isPlayingLocalVideo = true;
+        await _localVideoController!.play();
+      });
+    } catch (e) {
+      _lastError = 'No se pudo reproducir el video: $e';
+      _safeNotify();
+    }
+  }
+
   // ---- TRANSMISIÓN RTMP / RTMPS (YOUTUBE LIVE / FACEBOOK LIVE) ----
 
   Future<void> startRtmpLive({
@@ -250,25 +512,23 @@ class DirectorController extends ChangeNotifier {
     _safeNotify();
   }
 
-  // ---- IMÁGENES EN LA TRANSMISIÓN (LOGO / PLACA PANTALLA COMPLETA) ----
+  // ---- COMPATIBILIDAD DIÁLOGO MEDIA (IMAGEN ÚNICA / VIDEO ÚNICO) ----
 
   Future<void> pickOverlayImage() async {
-    try {
-      final picked = await _imagePicker.pickImage(source: ImageSource.gallery);
-      if (picked == null || _isDisposed) return;
-      _imageOverlay = _imageOverlay.copyWith(
-        filePath: picked.path,
-        isVisible: true,
-      );
-      _safeNotify();
-    } catch (e) {
-      _lastError = 'No se pudo cargar la imagen: $e';
-      _safeNotify();
+    await addImagesToPauta();
+    if (_mediaCues.isNotEmpty) {
+      await triggerMediaCue(_mediaCues.last.id);
     }
   }
 
   void setImageOverlayVisible(bool visible) {
     _imageOverlay = _imageOverlay.copyWith(isVisible: visible);
+    if (!visible) {
+      _activeLogoCueId = null;
+      if (_findCueById(_activeProgramCueId)?.type == MediaCueType.image) {
+        _activeProgramCueId = null;
+      }
+    }
     _safeNotify();
   }
 
@@ -283,35 +543,18 @@ class DirectorController extends ChangeNotifier {
   }
 
   void clearImageOverlay() {
+    _activeLogoCueId = null;
+    if (_findCueById(_activeProgramCueId)?.type == MediaCueType.image) {
+      _activeProgramCueId = null;
+    }
     _imageOverlay = const ImageOverlayConfig();
     _safeNotify();
   }
 
-  // ---- VIDEOS LOCALES (MP4 EN MONITOR EN VIVO) ----
-
   Future<void> pickAndPlayVideo() async {
-    try {
-      final picked = await _imagePicker.pickVideo(source: ImageSource.gallery);
-      if (picked == null || _isDisposed) return;
-
-      await _disposeLocalVideo();
-      final controller = VideoPlayerController.file(File(picked.path));
-      await controller.initialize();
-      if (_isDisposed) {
-        await controller.dispose();
-        return;
-      }
-
-      await controller.setLooping(_isLocalVideoLooping);
-      await controller.setVolume(_isLocalVideoMuted ? 0.0 : 1.0);
-      await controller.play();
-
-      _localVideoController = controller;
-      _isPlayingLocalVideo = true;
-      _safeNotify();
-    } catch (e) {
-      _lastError = 'No se pudo reproducir el video: $e';
-      _safeNotify();
+    await addVideoToPauta();
+    if (_mediaCues.isNotEmpty && _mediaCues.last.type == MediaCueType.video) {
+      await triggerMediaCue(_mediaCues.last.id);
     }
   }
 
@@ -349,13 +592,18 @@ class DirectorController extends ChangeNotifier {
   }
 
   Future<void> stopLocalVideoAndReturnToCameras() async {
-    _isPlayingLocalVideo = false;
-    await _localVideoController?.pause();
-    _safeNotify();
+    await _runWithTransition(() async {
+      _isPlayingLocalVideo = false;
+      if (_findCueById(_activeProgramCueId)?.type == MediaCueType.video) {
+        _activeProgramCueId = null;
+      }
+      await _localVideoController?.pause();
+    });
   }
 
   Future<void> _disposeLocalVideo() async {
     _isPlayingLocalVideo = false;
+    _loadedVideoPath = null;
     final old = _localVideoController;
     _localVideoController = null;
     await old?.dispose();
@@ -440,7 +688,7 @@ class DirectorController extends ChangeNotifier {
       slotIndex: emptySlotIndex,
       renderer: renderer,
       status: CameraConnectionState.connecting,
-      isAudioMuted: true, // Silenciada por defecto
+      isAudioMuted: true,
       quality: quality,
     );
     _safeNotify();
@@ -543,50 +791,41 @@ class DirectorController extends ChangeNotifier {
     }
   }
 
+  /// Selecciona una cámara al Monitor EN VIVO (quita placas/videos con transición suave)
   Future<void> selectLiveCamera(String cameraId) async {
     final node = _findNodeById(cameraId);
     if (node == null || node.stream == null) return;
 
-    // Al seleccionar una cámara en vivo, pausar video local si estaba al aire
-    if (_isPlayingLocalVideo) {
-      _isPlayingLocalVideo = false;
-      await _localVideoController?.pause();
-    }
+    final switchingFromMedia =
+        _activeProgramCueId != null || _isPlayingLocalVideo;
 
-    if (_activeLiveCameraId == node.id &&
+    if (!switchingFromMedia &&
+        _activeLiveCameraId == node.id &&
         programRenderer.srcObject == node.stream) {
-      _safeNotify();
       return;
     }
 
-    if (_transitionMode == TransitionMode.fade && _activeLiveCameraId != null) {
-      _isFadingTransition = true;
-      _safeNotify();
-      await Future.delayed(const Duration(milliseconds: 160));
-      if (_isDisposed) return;
-    }
-
-    _activeLiveCameraId = node.id;
-    programRenderer.srcObject = node.stream;
-    _syncAudioRouting();
-    _broadcastCurrentTally();
-
-    if (_recorder.isRecording && node.stream != null) {
-      try {
-        await _recorder.switchRecordedStream(node.stream!);
-      } catch (e) {
-        _lastError = 'Error al continuar grabación: $e';
+    await _runWithTransition(() async {
+      _activeProgramCueId = null;
+      if (_isPlayingLocalVideo) {
+        _isPlayingLocalVideo = false;
+        await _localVideoController?.pause();
       }
-    }
+      _restoreLogoOrClearImage();
 
-    if (_isFadingTransition) {
-      _safeNotify();
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (_isDisposed) return;
-      _isFadingTransition = false;
-    }
+      _activeLiveCameraId = node.id;
+      programRenderer.srcObject = node.stream;
+      _syncAudioRouting();
+      _broadcastCurrentTally();
 
-    _safeNotify();
+      if (_recorder.isRecording && node.stream != null) {
+        try {
+          await _recorder.switchRecordedStream(node.stream!);
+        } catch (e) {
+          _lastError = 'Error al continuar grabación: $e';
+        }
+      }
+    });
   }
 
   void _broadcastCurrentTally() {
@@ -627,7 +866,6 @@ class DirectorController extends ChangeNotifier {
     }
   }
 
-  /// Cicla el modo de audio: SOLO TABLET -> AFV -> MIX -> SOLO TABLET
   void cycleAudioMixMode() {
     switch (_audioMixMode) {
       case AudioMixMode.tabletOnly:
@@ -648,8 +886,6 @@ class DirectorController extends ChangeNotifier {
     final node = _findNodeById(cameraId);
     if (node == null) return;
     node.isAudioMuted = !node.isAudioMuted;
-    // Si el usuario activa manualmente una cámara mientras estaba en SOLO TABLET,
-    // pasar a MIX para que se escuche esa cámara si así lo desea.
     if (!node.isAudioMuted && _audioMixMode == AudioMixMode.tabletOnly) {
       _audioMixMode = AudioMixMode.mix;
     }

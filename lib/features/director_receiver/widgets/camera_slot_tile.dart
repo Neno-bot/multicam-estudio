@@ -68,40 +68,33 @@ class CameraSlotTile extends StatelessWidget {
                 objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
               )
             else
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    camera != null
-                        ? Icons.sync_rounded
-                        : Icons.qr_code_2_rounded,
-                    color: camera != null
-                        ? Colors.amber
-                        : const Color(0xFF60A5FA),
-                    size: 28,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    camera != null
-                        ? 'Conectando...'
-                        : 'CAM ${slotIndex + 1} • + AÑADIR',
-                    style: TextStyle(
-                      color: Colors.grey.shade400,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
+              Padding(
+                padding: const EdgeInsets.only(bottom: 22),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      camera != null
+                          ? Icons.sync_rounded
+                          : Icons.qr_code_2_rounded,
+                      color: camera != null
+                          ? Colors.amber
+                          : const Color(0xFF60A5FA),
+                      size: 22,
                     ),
-                  ),
-                  if (camera == null) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
-                      'Toca para QR',
+                      camera != null
+                          ? 'Conectando...'
+                          : '+ AÑADIR QR',
                       style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 10,
+                        color: Colors.grey.shade400,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
 
             // Badge compacto de telemetría arriba a la izquierda

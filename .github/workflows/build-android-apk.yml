@@ -234,8 +234,8 @@ jobs:
         run: |
           if gh release view latest-android-test >/dev/null 2>&1; then
             gh release edit latest-android-test \
-              --title "NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy S24 FE y Android 64-bit (ID com.nenocam.studio, firma v1+v2+v3)." \
+              --title "NenoCam Studio v1.3.0 (Bandeja Pauta Switcher: Multi-Imágenes + Videos)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Incluye nueva Bandeja Pauta Switcher (múltiples imágenes y videos en 1 toque con transición CUT/FADE) optimizada para Teléfono y Tablet." \
               --latest
             gh release upload latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
@@ -245,7 +245,7 @@ jobs:
             gh release create latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
               build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
-              --title "NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy S24 FE y Android 64-bit (ID com.nenocam.studio, firma v1+v2+v3)." \
+              --title "NenoCam Studio v1.3.0 (Bandeja Pauta Switcher: Multi-Imágenes + Videos)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Incluye nueva Bandeja Pauta Switcher (múltiples imágenes y videos en 1 toque con transición CUT/FADE) optimizada para Teléfono y Tablet." \
               --latest
           fi

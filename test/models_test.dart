@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:multicam_studio/core/models/media_cue_item.dart';
+import 'package:multicam_studio/core/models/media_overlay_config.dart';
 import 'package:multicam_studio/core/models/overlay_config.dart';
 import 'package:multicam_studio/core/models/signaling_message.dart';
 import 'package:multicam_studio/core/models/stream_stats.dart';
@@ -82,6 +84,23 @@ void main() {
       expect(UpdateCheckService.isVersionNewer('1.3', '1.2.0'), true);
       expect(UpdateCheckService.isVersionNewer('1.2.0', '1.2.0'), false);
       expect(UpdateCheckService.isVersionNewer('1.1.9', '1.2.0'), false);
+    });
+  });
+
+  group('MediaCueItem', () {
+    test('distingue placa pantalla completa vs logo en esquina', () {
+      const slide = MediaCueItem(
+        id: '1',
+        label: 'IMG 1',
+        filePath: '/tmp/a.png',
+        type: MediaCueType.image,
+      );
+      expect(slide.isCornerLogo, false);
+
+      final logo = slide.copyWith(
+        imagePlacement: ImageOverlayPlacement.topRightLogo,
+      );
+      expect(logo.isCornerLogo, true);
     });
   });
 }

@@ -13,6 +13,7 @@ import 'widgets/live_program_monitor.dart';
 import 'widgets/live_stream_dialog.dart';
 import 'widgets/lower_third_dialog.dart';
 import 'widgets/media_manager_dialog.dart';
+import 'widgets/media_pauta_panel.dart';
 import 'widgets/preview_monitor.dart';
 
 class DirectorScreen extends StatefulWidget {
@@ -169,14 +170,14 @@ class _DirectorView extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             programMonitor,
-            // Barra flotante discreta abajo a la derecha para cambiar cámaras o salir
+            // Barra flotante discreta abajo a la derecha (Cámaras 1-4 + Pauta rápida + Salir)
             Positioned(
               right: 12,
               bottom: 12,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.black.withAlpha(155),
+                  color: Colors.black.withAlpha(165),
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.white24),
                 ),
@@ -197,8 +198,8 @@ class _DirectorView extends StatelessWidget {
                               : null,
                           borderRadius: BorderRadius.circular(14),
                           child: Container(
-                            width: 30,
-                            height: 28,
+                            width: 28,
+                            height: 26,
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: live
@@ -206,12 +207,12 @@ class _DirectorView extends StatelessWidget {
                                   : ready
                                       ? Colors.white24
                                       : Colors.white10,
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(13),
                             ),
                             child: Text(
-                              '${i + 1}',
+                              'C${i + 1}',
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: 10.5,
                                 fontWeight: FontWeight.w800,
                                 color: ready ? Colors.white : Colors.white38,
                               ),
@@ -220,13 +221,41 @@ class _DirectorView extends StatelessWidget {
                         ),
                       );
                     }),
-                    const SizedBox(width: 6),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      tooltip: 'Imágenes y Videos',
-                      onPressed: () => _showMediaDialog(context, ctrl),
-                      icon: const Icon(Icons.perm_media_rounded, size: 18),
-                    ),
+                    if (ctrl.mediaCues.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      Container(width: 1, height: 18, color: Colors.white24),
+                      const SizedBox(width: 4),
+                      ...ctrl.mediaCues.take(4).map((cue) {
+                        final active = ctrl.isCueActive(cue.id);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: InkWell(
+                            onTap: () => ctrl.triggerMediaCue(cue.id),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: active
+                                    ? const Color(0xFF3B82F6)
+                                    : Colors.white12,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                cue.label,
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                    const SizedBox(width: 4),
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       tooltip: 'Salir de Pantalla Limpia',
@@ -242,36 +271,34 @@ class _DirectorView extends StatelessWidget {
       );
     }
 
-    final hasActiveMedia =
-        ctrl.imageOverlay.isVisible || ctrl.isPlayingLocalVideo;
-
     return Scaffold(
       backgroundColor: const Color(0xFF0B0E14),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           child: Column(
             children: [
               // Cabecera de control profesional de NenoCam Studio
               SizedBox(
-                height: 44,
+                height: 40,
                 child: Row(
                   children: [
                     IconButton(
+                      visualDensity: VisualDensity.compact,
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.arrow_back_rounded),
                       tooltip: 'Salir del Modo Director',
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 2),
                     Text(
                       AppConstants.appName.toUpperCase(),
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
-                        letterSpacing: 1.1,
-                        fontSize: 14,
+                        letterSpacing: 1.0,
+                        fontSize: 13.5,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
 
                     Expanded(
                       child: SingleChildScrollView(
@@ -290,15 +317,24 @@ class _DirectorView extends StatelessWidget {
                               highlighted: ctrl.isRtmpLive,
                               onTap: () => _showLiveStreamDialog(context, ctrl),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
-                              icon: Icons.perm_media_rounded,
-                              label: 'MEDIA',
+                              icon: Icons.dashboard_customize_rounded,
+                              label: 'PAUTA (${ctrl.mediaCues.length})',
                               color: const Color(0xFF3B82F6),
-                              highlighted: hasActiveMedia,
-                              onTap: () => _showMediaDialog(context, ctrl),
+                              highlighted: ctrl.showPautaPanel,
+                              onTap: ctrl.togglePautaPanel,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
+                            _ActionChip(
+                              icon: Icons.auto_awesome_motion_rounded,
+                              label: ctrl.transitionMode == TransitionMode.cut
+                                  ? 'CUT'
+                                  : 'FADE',
+                              color: const Color(0xFFA855F7),
+                              onTap: ctrl.toggleTransitionMode,
+                            ),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: Icons.subtitles_rounded,
                               label: 'RÓTULO',
@@ -309,7 +345,7 @@ class _DirectorView extends StatelessWidget {
                               onTap: () =>
                                   _showLowerThirdDialog(context, ctrl),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: ctrl.audioMixMode == AudioMixMode.tabletOnly
                                   ? Icons.mic_rounded
@@ -322,21 +358,21 @@ class _DirectorView extends StatelessWidget {
                                   : const Color(0xFFF59E0B),
                               onTap: ctrl.cycleAudioMixMode,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: Icons.qr_code_2_rounded,
                               label: 'AÑADIR CAM',
                               color: const Color(0xFF60A5FA),
                               onTap: () => _showQrDialog(context, ctrl),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: Icons.fullscreen_rounded,
                               label: 'LIMPIO',
                               color: const Color(0xFF14B8A6),
                               onTap: ctrl.toggleCleanBroadcastMode,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: ctrl.studioMode
                                   ? Icons.view_column_rounded
@@ -346,16 +382,14 @@ class _DirectorView extends StatelessWidget {
                               highlighted: ctrl.studioMode,
                               onTap: ctrl.toggleStudioMode,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
-                              icon: Icons.auto_awesome_motion_rounded,
-                              label: ctrl.transitionMode == TransitionMode.cut
-                                  ? 'CUT'
-                                  : 'FADE',
-                              color: const Color(0xFFA855F7),
-                              onTap: ctrl.toggleTransitionMode,
+                              icon: Icons.tune_rounded,
+                              label: 'AJUSTES MEDIA',
+                              color: Colors.grey.shade400,
+                              onTap: () => _showMediaDialog(context, ctrl),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: Icons.speed_rounded,
                               label: 'STATS',
@@ -363,7 +397,7 @@ class _DirectorView extends StatelessWidget {
                               highlighted: ctrl.showTelemetry,
                               onTap: ctrl.toggleTelemetry,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _ActionChip(
                               icon: ctrl.isRecording
                                   ? Icons.stop_rounded
@@ -374,7 +408,7 @@ class _DirectorView extends StatelessWidget {
                               onTap: () =>
                                   _handleToggleRecording(context, ctrl),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 7),
                             _StatusChip(
                               icon: Icons.videocam_rounded,
                               label:
@@ -390,40 +424,56 @@ class _DirectorView extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
 
-              // Área Superior (~65%): Monitor EN VIVO solo, o PVW + TAKE + PGM en Modo Estudio
+              // Área Superior (~66%): Monitor EN VIVO + Bandeja PAUTA MEDIA a la derecha (adaptable a Teléfono y Tablet)
               Expanded(
-                flex: 65,
-                child: ctrl.studioMode
-                    ? Row(
-                        children: [
-                          Expanded(
-                            child: PreviewMonitor(
-                              previewRenderer: ctrl.previewRenderer,
-                              previewCamera: ctrl.previewCamera,
-                              showTelemetry: ctrl.showTelemetry,
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            child: _TakeControlColumn(
-                              canTake: ctrl.canTake,
-                              transitionMode: ctrl.transitionMode,
-                              onTake: ctrl.takePreviewToLive,
-                              onToggleTransition: ctrl.toggleTransitionMode,
-                            ),
-                          ),
-                          Expanded(child: programMonitor),
-                        ],
-                      )
-                    : programMonitor,
+                flex: 66,
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: ctrl.showPautaPanel ? 68 : 100,
+                      child: ctrl.studioMode
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: PreviewMonitor(
+                                    previewRenderer: ctrl.previewRenderer,
+                                    previewCamera: ctrl.previewCamera,
+                                    showTelemetry: ctrl.showTelemetry,
+                                  ),
+                                ),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: _TakeControlColumn(
+                                    canTake: ctrl.canTake,
+                                    transitionMode: ctrl.transitionMode,
+                                    onTake: ctrl.takePreviewToLive,
+                                    onToggleTransition:
+                                        ctrl.toggleTransitionMode,
+                                  ),
+                                ),
+                                Expanded(child: programMonitor),
+                              ],
+                            )
+                          : programMonitor,
+                    ),
+                    if (ctrl.showPautaPanel) ...[
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        flex: 32,
+                        child: MediaPautaPanel(),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
-              // Cuadrícula inferior para hasta 4 cámaras simultáneas (~35%)
+              // Cuadrícula inferior para hasta 4 cámaras simultáneas (~34%)
               Expanded(
-                flex: 35,
+                flex: 34,
                 child: Row(
                   children: List.generate(
                     NetworkConstants.maxConnectedCameras,
@@ -440,11 +490,11 @@ class _DirectorView extends StatelessWidget {
                       return Expanded(
                         child: Padding(
                           padding: EdgeInsets.only(
-                            left: index == 0 ? 0 : 6,
+                            left: index == 0 ? 0 : 5,
                             right: index ==
                                     NetworkConstants.maxConnectedCameras - 1
                                 ? 0
-                                : 6,
+                                : 5,
                           ),
                           child: CameraSlotTile(
                             slotIndex: index,
@@ -501,7 +551,7 @@ class _TakeControlColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 92,
+      width: 82,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -511,7 +561,7 @@ class _TakeControlColumn extends StatelessWidget {
               backgroundColor: const Color(0xFFEF4444),
               foregroundColor: Colors.white,
               disabledBackgroundColor: Colors.white10,
-              minimumSize: const Size(88, 66),
+              minimumSize: const Size(78, 58),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -519,30 +569,30 @@ class _TakeControlColumn extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.swap_horiz_rounded, size: 22),
+                const Icon(Icons.swap_horiz_rounded, size: 20),
                 const SizedBox(height: 2),
                 Text(
                   transitionMode == TransitionMode.cut ? 'TAKE' : 'FADE',
                   style: const TextStyle(
                     fontWeight: FontWeight.w900,
-                    fontSize: 13,
-                    letterSpacing: 1.0,
+                    fontSize: 12,
+                    letterSpacing: 0.9,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           OutlinedButton(
             onPressed: onToggleTransition,
             style: OutlinedButton.styleFrom(
-              minimumSize: const Size(88, 34),
+              minimumSize: const Size(78, 32),
               side: const BorderSide(color: Colors.white24),
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
             child: Text(
-              transitionMode == TransitionMode.cut ? 'Modo CUT' : 'Modo FADE',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+              transitionMode == TransitionMode.cut ? 'CUT' : 'FADE',
+              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
             ),
           ),
         ],
@@ -575,7 +625,7 @@ class _ActionChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: color.withAlpha(130)),
@@ -585,16 +635,16 @@ class _ActionChip extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                size: 15,
+                size: 14,
                 color: highlighted ? Colors.white : color,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
                   color: highlighted ? Colors.white : color,
                   fontWeight: FontWeight.w700,
-                  fontSize: 11.5,
+                  fontSize: 11,
                 ),
               ),
             ],
@@ -619,7 +669,7 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
         color: color.withAlpha(36),
         borderRadius: BorderRadius.circular(8),
@@ -628,14 +678,14 @@ class _StatusChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 15, color: color),
-          const SizedBox(width: 6),
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w700,
-              fontSize: 12,
+              fontSize: 11.5,
             ),
           ),
         ],
