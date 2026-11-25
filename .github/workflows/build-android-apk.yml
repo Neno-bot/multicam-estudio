@@ -152,12 +152,14 @@ jobs:
               }'''
 
           patch('android/app/build.gradle', [
+              (r'applicationId\s*=\s*"[^"]+"', 'applicationId = "com.nenocam.studio"'),
+              (r'applicationId\s+"[^"]+"', 'applicationId "com.nenocam.studio"'),
               (r'compileSdk\s*=\s*flutter\.compileSdkVersion', 'compileSdk = 35'),
               (r'compileSdkVersion\s+flutter\.compileSdkVersion', 'compileSdkVersion 35'),
               (r'minSdk\s*=\s*flutter\.minSdkVersion', 'minSdk = 23'),
               (r'minSdkVersion\s+flutter\.minSdkVersion', 'minSdkVersion 23'),
-              (r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 35'),
-              (r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 35'),
+              (r'targetSdk\s*=\s*flutter\.targetSdkVersion', 'targetSdk = 34'),
+              (r'targetSdkVersion\s+flutter\.targetSdkVersion', 'targetSdkVersion 34'),
               (r'buildTypes\s*\{\s*release\s*\{.*?\}\s*\}', groovy_release_block),
           ])
 
@@ -201,11 +203,21 @@ jobs:
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
 
-      - name: Verificar firma APK antes de publicar
+      - name: Firmar con v1 + v2 + v3 (Samsung One UI 7 / Android 15+) y verificar APK
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
-          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
-          "$APKSIGNER" verify --verbose build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
+          for apk in build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk; do
+            "$APKSIGNER" sign \
+              --ks android/app/release.jks \
+              --ks-key-alias nenocam \
+              --ks-pass pass:nenocam_release_key \
+              --key-pass pass:nenocam_release_key \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              "$apk"
+            "$APKSIGNER" verify --verbose "$apk"
+          done
 
       - name: Subir APKs como Artifact descargable
         uses: actions/upload-artifact@v4
@@ -220,19 +232,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-android-test
-          name: NenoCam Studio v1.2 (YouTube/Facebook Live + Media + Solo Tablet)
+          name: NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)
           body: |
-            ### NenoCam Studio v1.2 — Descarga directa para Android
-            - **Teléfonos y Tablets modernos (64-bit, recomendado):** **`NenoCam-Studio-arm64.apk`**
+            ### NenoCam Studio v1.2.1 — Descarga directa para Android
+            - **Teléfonos Samsung Galaxy S24 FE y dispositivos modernos (64-bit):** **`NenoCam-Studio-arm64.apk`**
             - **Dispositivos antiguos (32-bit):** **`NenoCam-Studio-armv7.apk`**
 
-            #### Novedades v1.2
-            - Nombre oficial **NenoCam Studio**
-            - **Transmisión EN VIVO a YouTube Live (RTMP) y Facebook Live (RTMPS)** con Modo Pantalla Limpia
-            - **Imágenes (logos / placas)** y **Videos locales (MP4)** directamente en el Monitor EN VIVO
-            - **Audio Solo Tablet por defecto** (teléfonos emisores silenciados, cero eco)
-            - **2 códigos QR** al tocar cualquier casilla vacía (`Conectar Cámara` e `Instalar App`)
-            - **Buscador de actualizaciones** integrado en la pantalla principal
+            #### Correcciones v1.2.1 (Samsung One UI 7 / Android 15)
+            - Nuevo ID limpio **`com.nenocam.studio`** (elimina conflictos con instalaciones previas de MultiCam Studio)
+            - Firma completa **APK Signature Scheme v1 + v2 + v3** verificada con `apksigner`
+            - `targetSdk 34` + `extractNativeLibs="true"` para máxima compatibilidad en Samsung Galaxy S24 FE
           files: |
             build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
             build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk

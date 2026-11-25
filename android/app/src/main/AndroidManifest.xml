@@ -22,7 +22,7 @@
         android:extractNativeLibs="true"
         android:usesCleartextTraffic="true">
         <activity
-            android:name=".MainActivity"
+            android:name="com.multicam.studio.multicam_studio.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -41,7 +41,7 @@
 
         <!-- Servicio en primer plano para transmitir pantalla + micrófono de la Tablet a YouTube/Facebook Live -->
         <service
-            android:name=".RtmpStreamService"
+            android:name="com.multicam.studio.multicam_studio.RtmpStreamService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
