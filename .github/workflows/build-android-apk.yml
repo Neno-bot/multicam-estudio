@@ -229,22 +229,23 @@ jobs:
           retention-days: 30
 
       - name: Publicar enlaces directos en GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-android-test
-          name: NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)
-          body: |
-            ### NenoCam Studio v1.2.1 — Descarga directa para Android
-            - **Teléfonos Samsung Galaxy S24 FE y dispositivos modernos (64-bit):** **`NenoCam-Studio-arm64.apk`**
-            - **Dispositivos antiguos (32-bit):** **`NenoCam-Studio-armv7.apk`**
-
-            #### Correcciones v1.2.1 (Samsung One UI 7 / Android 15)
-            - Nuevo ID limpio **`com.nenocam.studio`** (elimina conflictos con instalaciones previas de MultiCam Studio)
-            - Firma completa **APK Signature Scheme v1 + v2 + v3** verificada con `apksigner`
-            - `targetSdk 34` + `extractNativeLibs="true"` para máxima compatibilidad en Samsung Galaxy S24 FE
-          files: |
-            build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk
-            build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk
-          make_latest: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view latest-android-test >/dev/null 2>&1; then
+            gh release edit latest-android-test \
+              --title "NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy S24 FE y Android 64-bit (ID com.nenocam.studio, firma v1+v2+v3)." \
+              --latest
+            gh release upload latest-android-test \
+              build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
+              build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
+              --clobber
+          else
+            gh release create latest-android-test \
+              build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
+              build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
+              --title "NenoCam Studio v1.2.1 (Fix Samsung S24 FE / One UI 7)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy S24 FE y Android 64-bit (ID com.nenocam.studio, firma v1+v2+v3)." \
+              --latest
+          fi
