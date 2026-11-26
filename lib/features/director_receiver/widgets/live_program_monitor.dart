@@ -407,8 +407,20 @@ class _LiveProgramMonitorState extends State<LiveProgramMonitor> {
       ),
     );
 
+    // Marco exacto 16:9 (1920x1080 / 1280x720) para que imágenes, videos, cámaras y capas
+    // salgan sin recortes, sin deformación y 100% fieles al encuadre final de YouTube/Facebook/Galería.
+    final framed16x9Canvas = Container(
+      width: double.infinity,
+      color: const Color(0xFF070A0F),
+      alignment: Alignment.center,
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: pureCanvas,
+      ),
+    );
+
     if (widget.cleanMode) {
-      return pureCanvas;
+      return framed16x9Canvas;
     }
 
     // En Modo Director: barra técnica delgada FUERA del cuadro rojo (arriba)
@@ -552,7 +564,7 @@ class _LiveProgramMonitorState extends State<LiveProgramMonitor> {
           ),
         ),
         const SizedBox(height: 3),
-        Expanded(child: pureCanvas),
+        Expanded(child: framed16x9Canvas),
       ],
     );
   }

@@ -518,9 +518,9 @@ class _DirectorView extends StatelessWidget {
                       flex: ctrl.showPautaPanel ? 67 : 100,
                       child: Column(
                         children: [
-                          // Monitor EN VIVO (o PVW + TAKE + PGM en Modo Estudio)
+                          // Monitor EN VIVO exacto 16:9 (o PVW + TAKE + PGM en Modo Estudio)
                           Expanded(
-                            flex: 66,
+                            flex: 70,
                             child: ctrl.studioMode
                                 ? Row(
                                     children: [
@@ -552,7 +552,7 @@ class _DirectorView extends StatelessWidget {
 
                           // Cuadrícula compacta para las 4 cámaras debajo del monitor
                           Expanded(
-                            flex: 34,
+                            flex: 30,
                             child: Row(
                               children: List.generate(
                                 NetworkConstants.maxConnectedCameras,
