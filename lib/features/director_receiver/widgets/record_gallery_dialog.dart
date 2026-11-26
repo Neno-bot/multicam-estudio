@@ -28,7 +28,7 @@ class RecordGalleryDialog extends StatefulWidget {
 class _RecordGalleryDialogState extends State<RecordGalleryDialog> {
   bool _is1080p = false;
   bool _audioEnabled = true;
-  bool _enterCleanMode = true;
+  bool _enterCleanMode = false;
 
   void _start() {
     Navigator.of(context).pop(
@@ -89,7 +89,7 @@ class _RecordGalleryDialogState extends State<RecordGalleryDialog> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Graba toda tu producción (cámaras, fotos, videos, capas y marca de agua) sin transmitir a internet. Al detener, el MP4 se guarda directo en la Galería (Movies/NenoCam Studio).',
+                'Graba EXCLUSIVAMENTE el cuadro rojo EN VIVO a pantalla completa (sin botones, sin notificaciones de WhatsApp y sin aviso de compartir pantalla). Al detener, el MP4 se guarda directo en tu Galería (Movies/NenoCam Studio).',
                 style: TextStyle(
                   fontSize: 11.5,
                   color: Colors.grey.shade300,
@@ -134,11 +134,11 @@ class _RecordGalleryDialogState extends State<RecordGalleryDialog> {
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: const Text(
-                  'Activar Pantalla Limpia al grabar',
+                  'Expandir monitor a pantalla completa (opcional)',
                   style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                 ),
                 subtitle: const Text(
-                  'Graba solo la transmisión limpia a pantalla completa con botones discretos para cambiar cámaras y pauta.',
+                  'Déjalo desactivado para ver tus cámaras, pauta y capas mientras grabas SOLO el cuadro rojo limpio.',
                   style: TextStyle(fontSize: 10.5),
                 ),
                 value: _enterCleanMode,

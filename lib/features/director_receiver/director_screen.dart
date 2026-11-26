@@ -187,6 +187,9 @@ class _DirectorView extends StatelessWidget {
       isRtmpLive: ctrl.isRtmpLive,
       rtmpBitrateKbps: ctrl.rtmpBitrateKbps,
       showTelemetry: ctrl.showTelemetry,
+      fillFrame: ctrl.fillProgramFrame,
+      onToggleFillFrame: ctrl.toggleFillProgramFrame,
+      onCaptureRectChanged: ctrl.updateProgramCaptureRect,
       cleanMode: ctrl.cleanBroadcastMode,
     );
 

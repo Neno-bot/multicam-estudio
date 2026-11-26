@@ -239,8 +239,8 @@ jobs:
             gh release delete-asset latest-android-test MultiCam-Studio-arm64.apk --yes >/dev/null 2>&1 || true
             gh release delete-asset latest-android-test MultiCam-Studio-armv7.apk --yes >/dev/null 2>&1 || true
             gh release edit latest-android-test \
-              --title "NenoCam Studio v1.6.0 (Pegado 1-Toque Facebook/YouTube + Grabar a Galería)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Nuevo botón PEGAR en 1 toque para claves de Facebook/YouTube Live (sin que el teclado tape la escritura) y grabación completa de producción MP4 guardada directo en la Galería (Movies/NenoCam Studio)." \
+              --title "NenoCam Studio v1.7.0 (Captura Limpia Solo Cuadro EN VIVO — Sin Notificaciones ni Popups)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora transmite y graba EXCLUSIVAMENTE el cuadro rojo EN VIVO a 16:9 completo sin bordes negros, sin botones del Director, sin notificaciones de WhatsApp y sin aviso de compartir pantalla." \
               --latest
             gh release upload latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
@@ -250,7 +250,7 @@ jobs:
             gh release create latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
               build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
-              --title "NenoCam Studio v1.6.0 (Pegado 1-Toque Facebook/YouTube + Grabar a Galería)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Nuevo botón PEGAR en 1 toque para claves de Facebook/YouTube Live (sin que el teclado tape la escritura) y grabación completa de producción MP4 guardada directo en la Galería (Movies/NenoCam Studio)." \
+              --title "NenoCam Studio v1.7.0 (Captura Limpia Solo Cuadro EN VIVO — Sin Notificaciones ni Popups)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora transmite y graba EXCLUSIVAMENTE el cuadro rojo EN VIVO a 16:9 completo sin bordes negros, sin botones del Director, sin notificaciones de WhatsApp y sin aviso de compartir pantalla." \
               --latest
           fi

@@ -84,9 +84,10 @@ class DirectorController extends ChangeNotifier {
   bool _isLocalVideoLooping = true;
   bool _isLocalVideoMuted = false;
 
-  // Modo Estudio, Telemetría y Modo Pantalla Limpia (para YouTube/Facebook Live)
+  // Modo Estudio, Telemetría, Encuadre completo y Modo Pantalla Limpia
   bool _studioMode = false;
   bool _showTelemetry = true;
+  bool _fillProgramFrame = true;
   bool _cleanBroadcastMode = false;
   Timer? _telemetryTimer;
 
@@ -140,6 +141,7 @@ class DirectorController extends ChangeNotifier {
   bool get isLocalVideoMuted => _isLocalVideoMuted;
   bool get studioMode => _studioMode;
   bool get showTelemetry => _showTelemetry;
+  bool get fillProgramFrame => _fillProgramFrame;
   bool get cleanBroadcastMode => _cleanBroadcastMode;
   RtmpStreamStatus get rtmpStatus => _rtmpStatus;
   bool get isRtmpLive =>
@@ -737,7 +739,21 @@ class DirectorController extends ChangeNotifier {
     }
   }
 
-  // ---- TRANSMISIÓN RTMP / RTMPS (YOUTUBE LIVE / FACEBOOK LIVE) ----
+  void toggleFillProgramFrame() {
+    _fillProgramFrame = !_fillProgramFrame;
+    _safeNotify();
+  }
+
+  void updateProgramCaptureRect(int left, int top, int right, int bottom) {
+    _rtmpService.updateCaptureRect(
+      left: left,
+      top: top,
+      right: right,
+      bottom: bottom,
+    );
+  }
+
+  // ---- TRANSMISIÓN RTMP / RTMPS (YOUTUBE LIVE / FACEBOOK LIVE — SOLO CUADRO EN VIVO) ----
 
   Future<void> startRtmpLive({
     required String rtmpUrl,
@@ -745,14 +761,9 @@ class DirectorController extends ChangeNotifier {
     required bool enterCleanMode,
   }) async {
     _lastError = null;
-    if (_isGalleryRecording) {
-      _lastError = 'Detén primero la grabación en Galería antes de transmitir en vivo.';
-      _safeNotify();
-      return;
-    }
     try {
       _rtmpStatus = RtmpStreamStatus.connecting;
-      _rtmpStatusMessage = 'Solicitando permiso de transmisión...';
+      _rtmpStatusMessage = 'Conectando transmisión limpia (solo cuadro EN VIVO)...';
       if (enterCleanMode) {
         _cleanBroadcastMode = true;
       }
@@ -761,7 +772,7 @@ class DirectorController extends ChangeNotifier {
       await _rtmpService.startStream(
         rtmpUrl: rtmpUrl,
         bitrateKbps: bitrateKbps,
-        audioEnabled: true, // Usa el micrófono de la Tablet Director
+        audioEnabled: true, // Usa el micrófono del dispositivo principal
       );
     } catch (e) {
       _rtmpStatus = RtmpStreamStatus.idle;
@@ -1197,20 +1208,15 @@ class DirectorController extends ChangeNotifier {
     );
   }
 
-  /// Inicia la grabación completa de la producción directamente a la Galería (Movies/NenoCam Studio)
+  /// Inicia la grabación limpia de SOLO el cuadro EN VIVO directo a la Galería (Movies/NenoCam Studio)
   Future<void> startGalleryRecording({
     int width = 1280,
     int height = 720,
     int bitrateKbps = 4000,
     bool audioEnabled = true,
-    bool enterCleanMode = true,
+    bool enterCleanMode = false,
   }) async {
     _lastError = null;
-    if (isRtmpLive) {
-      _lastError = 'Detén primero la transmisión EN VIVO antes de grabar a Galería.';
-      _safeNotify();
-      return;
-    }
     try {
       if (enterCleanMode) {
         _cleanBroadcastMode = true;

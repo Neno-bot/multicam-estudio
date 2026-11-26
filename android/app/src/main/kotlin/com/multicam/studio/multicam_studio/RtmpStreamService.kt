@@ -1,16 +1,21 @@
 package com.multicam.studio.multicam_studio
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.core.content.ContextCompat
 import com.pedro.common.ConnectChecker
-import com.pedro.library.rtmp.RtmpDisplay
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.audio.NoAudioSource
+import com.pedro.library.generic.GenericStream
 
 class RtmpStreamService : Service(), ConnectChecker {
 
@@ -18,8 +23,6 @@ class RtmpStreamService : Service(), ConnectChecker {
         const val ACTION_START = "com.nenocam.studio.ACTION_START_RTMP"
         const val ACTION_STOP = "com.nenocam.studio.ACTION_STOP_RTMP"
         const val EXTRA_URL = "rtmp_url"
-        const val EXTRA_RESULT_CODE = "result_code"
-        const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_BITRATE = "bitrate"
         const val EXTRA_AUDIO_ENABLED = "audio_enabled"
 
@@ -33,7 +36,7 @@ class RtmpStreamService : Service(), ConnectChecker {
         var eventCallback: ((String, String) -> Unit)? = null
     }
 
-    private var rtmpDisplay: RtmpDisplay? = null
+    private var genericStream: GenericStream? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -44,30 +47,16 @@ class RtmpStreamService : Service(), ConnectChecker {
         when (intent?.action) {
             ACTION_START -> {
                 val url = intent.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-                val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
-                }
                 val bitrate = intent.getIntExtra(EXTRA_BITRATE, 2500 * 1024)
                 val audioEnabled = intent.getBooleanExtra(EXTRA_AUDIO_ENABLED, true)
 
                 startForegroundWithTypes(audioEnabled)
-
-                if (resultData == null) {
-                    eventCallback?.invoke("error", "Permiso de captura de pantalla cancelado.")
-                    stopSelf()
-                    return START_NOT_STICKY
-                }
-
-                startRtmpBroadcast(url, resultCode, resultData, bitrate, audioEnabled)
+                startRtmpBroadcast(url, bitrate, audioEnabled)
             }
 
             ACTION_STOP -> {
                 stopRtmpBroadcast()
-                stopSelf()
+                finishService()
             }
         }
         return START_NOT_STICKY
@@ -75,12 +64,17 @@ class RtmpStreamService : Service(), ConnectChecker {
 
     private fun startForegroundWithTypes(audioEnabled: Boolean) {
         val notification = buildNotification()
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceType = if (audioEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val serviceType = if (audioEnabled && hasMicPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             }
             startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
@@ -90,53 +84,70 @@ class RtmpStreamService : Service(), ConnectChecker {
 
     private fun startRtmpBroadcast(
         url: String,
-        resultCode: Int,
-        resultData: Intent,
         bitrate: Int,
         audioEnabled: Boolean,
     ) {
         try {
             stopRtmpBroadcast()
-            val display = RtmpDisplay(applicationContext, true, this)
-            display.setIntentResult(resultCode, resultData)
 
-            val dpi = resources.displayMetrics.densityDpi
-            val videoOk = display.prepareVideo(1280, 720, 30, bitrate, 0, dpi)
-            val audioOk = if (audioEnabled) {
-                display.prepareAudio(128 * 1024, 44100, true, true, true)
+            val hasMicPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            val useAudio = audioEnabled && hasMicPermission
+
+            val videoSource = ProgramCanvasVideoSource()
+            val audioSource = if (useAudio) MicrophoneSource() else NoAudioSource()
+            val stream = GenericStream(applicationContext, this, videoSource, audioSource)
+            stream.getGlInterface().setForceRender(true, 25)
+
+            val videoOk = stream.prepareVideo(1280, 720, bitrate, 25, 2, 0)
+            val audioOk = if (useAudio) {
+                stream.prepareAudio(44100, true, 128 * 1024)
             } else {
                 true
             }
 
             if (videoOk && audioOk) {
-                rtmpDisplay = display
+                genericStream = stream
                 isLiveStreaming = true
                 eventCallback?.invoke("connecting", "Conectando a servidor RTMP...")
-                display.startStream(url)
+                stream.startStream(url)
             } else {
                 isLiveStreaming = false
                 eventCallback?.invoke(
                     "error",
-                    "No se pudo iniciar el codificador de video/audio en este dispositivo."
+                    "No se pudo iniciar el codificador de video/audio en este dispositivo.",
                 )
-                stopSelf()
+                finishService()
             }
         } catch (e: Exception) {
             isLiveStreaming = false
             eventCallback?.invoke("error", e.message ?: "Error al iniciar RTMP")
-            stopSelf()
+            finishService()
         }
     }
 
     private fun stopRtmpBroadcast() {
         try {
-            if (rtmpDisplay?.isStreaming() == true) {
-                rtmpDisplay?.stopStream()
+            if (genericStream?.isStreaming == true) {
+                genericStream?.stopStream()
             }
+            genericStream?.release()
         } catch (_: Exception) {
         }
-        rtmpDisplay = null
+        genericStream = null
         isLiveStreaming = false
+    }
+
+    private fun finishService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+        stopSelf()
     }
 
     private fun createNotificationChannel() {
@@ -144,7 +155,7 @@ class RtmpStreamService : Service(), ConnectChecker {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "NenoCam Studio En Vivo",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = "Transmisión en vivo hacia YouTube / Facebook Live"
             }
@@ -162,7 +173,7 @@ class RtmpStreamService : Service(), ConnectChecker {
         }
         return builder
             .setContentTitle("NenoCam Studio EN VIVO")
-            .setContentText("Transmitiendo producción multicámara por RTMP...")
+            .setContentText("Transmitiendo monitor de programa limpio por RTMP...")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()
@@ -181,7 +192,7 @@ class RtmpStreamService : Service(), ConnectChecker {
         isLiveStreaming = false
         stopRtmpBroadcast()
         eventCallback?.invoke("error", "Falló la conexión RTMP: $reason")
-        stopSelf()
+        finishService()
     }
 
     override fun onNewBitrate(bitrate: Long) {
@@ -197,7 +208,7 @@ class RtmpStreamService : Service(), ConnectChecker {
         isLiveStreaming = false
         stopRtmpBroadcast()
         eventCallback?.invoke("error", "Clave de transmisión inválida (Auth Error)")
-        stopSelf()
+        finishService()
     }
 
     override fun onAuthSuccess() {

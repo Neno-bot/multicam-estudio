@@ -1,5 +1,6 @@
 package com.multicam.studio.multicam_studio
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,32 +8,33 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.MediaRecorder
 import android.media.MediaScannerConnection
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.MediaStore
+import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Graba EXCLUSIVAMENTE el Monitor EN VIVO (cuadro rojo) a 16:9 completo + micrófono
+ * sin usar MediaProjection (cero avisos de "Compartir pantalla" y cero notificaciones),
+ * y guarda el MP4 directamente en la Galería (Movies/NenoCam Studio).
+ */
 class ScreenRecordService : Service() {
 
     companion object {
         const val ACTION_START = "com.nenocam.studio.ACTION_START_RECORD"
         const val ACTION_STOP = "com.nenocam.studio.ACTION_STOP_RECORD"
-        const val EXTRA_RESULT_CODE = "result_code"
-        const val EXTRA_RESULT_DATA = "result_data"
         const val EXTRA_WIDTH = "width"
         const val EXTRA_HEIGHT = "height"
         const val EXTRA_BITRATE = "bitrate"
@@ -48,20 +50,11 @@ class ScreenRecordService : Service() {
         var eventCallback: ((String, String) -> Unit)? = null
     }
 
-    private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
     private var mediaRecorder: MediaRecorder? = null
+    private var framePump: ProgramCanvasCapture.FramePump? = null
     private var tempOutputFile: File? = null
     private var outputFileName: String = ""
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    private val projectionCallback = object : MediaProjection.Callback() {
-        override fun onStop() {
-            if (isRecording) {
-                stopRecordingAndSaveToGallery()
-            }
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
@@ -71,27 +64,13 @@ class ScreenRecordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-                val resultData: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(EXTRA_RESULT_DATA)
-                }
                 val width = intent.getIntExtra(EXTRA_WIDTH, 1280)
                 val height = intent.getIntExtra(EXTRA_HEIGHT, 720)
                 val bitrate = intent.getIntExtra(EXTRA_BITRATE, 4_000_000)
                 val audioEnabled = intent.getBooleanExtra(EXTRA_AUDIO_ENABLED, true)
 
                 startForegroundWithTypes(audioEnabled)
-
-                if (resultData == null) {
-                    eventCallback?.invoke("error", "Permiso de grabación cancelado.")
-                    stopSelf()
-                    return START_NOT_STICKY
-                }
-
-                startScreenRecording(resultCode, resultData, width, height, bitrate, audioEnabled)
+                startProgramRecording(width, height, bitrate, audioEnabled)
             }
 
             ACTION_STOP -> {
@@ -103,12 +82,17 @@ class ScreenRecordService : Service() {
 
     private fun startForegroundWithTypes(audioEnabled: Boolean) {
         val notification = buildNotification()
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val serviceType = if (audioEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val serviceType = if (audioEnabled && hasMicPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
             }
             startForeground(NOTIFICATION_ID, notification, serviceType)
         } else {
@@ -116,9 +100,7 @@ class ScreenRecordService : Service() {
         }
     }
 
-    private fun startScreenRecording(
-        resultCode: Int,
-        resultData: Intent,
+    private fun startProgramRecording(
         width: Int,
         height: Int,
         bitrate: Int,
@@ -127,17 +109,11 @@ class ScreenRecordService : Service() {
         try {
             cleanupHardware()
 
-            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val projection = mpm.getMediaProjection(resultCode, resultData)
-            if (projection == null) {
-                eventCallback?.invoke("error", "No se pudo obtener MediaProjection.")
-                stopSelf()
-                return
-            }
-
-            // Obligatorio en Android 14/15 antes de createVirtualDisplay
-            projection.registerCallback(projectionCallback, mainHandler)
-            mediaProjection = projection
+            val hasMicPermission = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            val useAudio = audioEnabled && hasMicPermission
 
             val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             outputFileName = "NenoCam_$stamp.mp4"
@@ -151,54 +127,56 @@ class ScreenRecordService : Service() {
                 MediaRecorder()
             }
 
-            if (audioEnabled) {
+            if (useAudio) {
                 recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
             }
             recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            if (audioEnabled) {
+            if (useAudio) {
                 recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 recorder.setAudioEncodingBitRate(128_000)
                 recorder.setAudioSamplingRate(44100)
             }
             recorder.setVideoEncodingBitRate(bitrate)
-            recorder.setVideoFrameRate(30)
+            recorder.setVideoFrameRate(25)
             recorder.setVideoSize(width, height)
             recorder.setOutputFile(cacheFile.absolutePath)
             recorder.prepare()
 
-            val dpi = resources.displayMetrics.densityDpi
-            virtualDisplay = projection.createVirtualDisplay(
-                "NenoCamGalleryRecorder",
-                width,
-                height,
-                dpi,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                recorder.surface,
-                null,
-                null,
-            )
-
+            val surface = recorder.surface
             recorder.start()
             mediaRecorder = recorder
+
+            val pump = ProgramCanvasCapture.FramePump(
+                targetSurface = surface,
+                outWidth = width,
+                outHeight = height,
+                fps = 25,
+            )
+            framePump = pump
             isRecording = true
+            pump.start()
+
             eventCallback?.invoke("started", outputFileName)
         } catch (e: Exception) {
             isRecording = false
             cleanupHardware()
             eventCallback?.invoke("error", e.message ?: "Error al iniciar la grabación")
-            stopSelf()
+            finishService()
         }
     }
 
     private fun stopRecordingAndSaveToGallery() {
         if (!isRecording && tempOutputFile == null) {
-            stopSelf()
+            finishService()
             return
         }
 
         isRecording = false
+        framePump?.stop()
+        framePump = null
+
         try {
             mediaRecorder?.stop()
         } catch (_: Exception) {
@@ -274,11 +252,8 @@ class ScreenRecordService : Service() {
     }
 
     private fun cleanupHardware() {
-        try {
-            virtualDisplay?.release()
-        } catch (_: Exception) {
-        }
-        virtualDisplay = null
+        framePump?.stop()
+        framePump = null
 
         try {
             mediaRecorder?.reset()
@@ -286,13 +261,6 @@ class ScreenRecordService : Service() {
         } catch (_: Exception) {
         }
         mediaRecorder = null
-
-        try {
-            mediaProjection?.unregisterCallback(projectionCallback)
-            mediaProjection?.stop()
-        } catch (_: Exception) {
-        }
-        mediaProjection = null
     }
 
     private fun finishService() {
@@ -312,7 +280,7 @@ class ScreenRecordService : Service() {
                 "NenoCam Studio Grabación",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Grabación local de producción multicámara para Galería"
+                description = "Grabación limpia del Monitor EN VIVO para Galería"
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -328,7 +296,7 @@ class ScreenRecordService : Service() {
         }
         return builder
             .setContentTitle("NenoCam Studio GRABANDO")
-            .setContentText("Guardando producción en MP4 para tu Galería...")
+            .setContentText("Guardando monitor limpio en MP4 para tu Galería...")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .build()

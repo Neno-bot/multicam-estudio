@@ -49,7 +49,7 @@ class _LiveStreamDialogState extends State<LiveStreamDialog> {
   late final TextEditingController _serverCtrl;
   late final TextEditingController _keyCtrl;
   int _bitrateKbps = 2500;
-  bool _enterCleanMode = true;
+  bool _enterCleanMode = false;
   bool _hideKey = false;
   bool _showServerField = false;
   String? _pasteFeedback;
@@ -407,12 +407,12 @@ class _LiveStreamDialogState extends State<LiveStreamDialog> {
           dense: true,
           contentPadding: EdgeInsets.zero,
           title: const Text(
-            'Pantalla Limpia al iniciar',
+            'Vista Pantalla Completa (opcional)',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           ),
           subtitle: const Text(
-            'Solo monitor EN VIVO + controles discretos',
-            style: TextStyle(fontSize: 10.5),
+            'Solo se transmite el cuadro rojo EN VIVO (sin botones ni notificaciones).',
+            style: TextStyle(fontSize: 10),
           ),
           value: _enterCleanMode,
           onChanged: (v) => setState(() => _enterCleanMode = v),

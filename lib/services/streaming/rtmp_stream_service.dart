@@ -30,6 +30,22 @@ class RtmpStreamService {
     return _events!;
   }
 
+  Future<void> updateCaptureRect({
+    required int left,
+    required int top,
+    required int right,
+    required int bottom,
+  }) async {
+    try {
+      await _methodChannel.invokeMethod<bool>('updateCaptureRect', {
+        'left': left,
+        'top': top,
+        'right': right,
+        'bottom': bottom,
+      });
+    } catch (_) {}
+  }
+
   Future<void> startStream({
     required String rtmpUrl,
     int bitrateKbps = 2500,

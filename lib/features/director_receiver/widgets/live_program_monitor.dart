@@ -11,7 +11,19 @@ import '../../../core/models/overlay_config.dart';
 import '../../../core/models/overlay_layer_item.dart';
 import '../../../core/models/stream_stats.dart';
 
-class LiveProgramMonitor extends StatelessWidget {
+typedef CaptureRectCallback = void Function(
+  int left,
+  int top,
+  int right,
+  int bottom,
+);
+
+/// Monitor Principal EN VIVO (PGM):
+/// - La barra técnica (EN VIVO, CAM, REC, STREAM, telemetría, LLENAR/AJUSTAR) vive ARRIBA
+///   fuera del cuadro rojo, de modo que DENTRO del cuadro rojo solo existe video limpio.
+/// - El motor nativo captura EXCLUSIVAMENTE el interior del cuadro rojo (16:9 completo,
+///   sin bordes negros, sin botones del Director y sin notificaciones del teléfono).
+class LiveProgramMonitor extends StatefulWidget {
   final RTCVideoRenderer programRenderer;
   final CameraNode? activeCamera;
   final bool isFadingTransition;
@@ -28,6 +40,9 @@ class LiveProgramMonitor extends StatelessWidget {
   final bool isRtmpLive;
   final String? rtmpBitrateKbps;
   final bool showTelemetry;
+  final bool fillFrame;
+  final VoidCallback? onToggleFillFrame;
+  final CaptureRectCallback? onCaptureRectChanged;
   final bool cleanMode;
 
   const LiveProgramMonitor({
@@ -47,8 +62,51 @@ class LiveProgramMonitor extends StatelessWidget {
     this.overlayLayers = const [],
     this.overlayVideoControllerFor,
     this.watermarkConfig = const WatermarkConfig(),
+    this.fillFrame = true,
+    this.onToggleFillFrame,
+    this.onCaptureRectChanged,
     this.cleanMode = false,
   });
+
+  @override
+  State<LiveProgramMonitor> createState() => _LiveProgramMonitorState();
+}
+
+class _LiveProgramMonitorState extends State<LiveProgramMonitor> {
+  final GlobalKey _canvasKey = GlobalKey();
+  int _lastL = -1;
+  int _lastT = -1;
+  int _lastR = -1;
+  int _lastB = -1;
+
+  void _scheduleRectReport() {
+    if (widget.onCaptureRectChanged == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _canvasKey.currentContext;
+      if (ctx == null) return;
+      final renderObj = ctx.findRenderObject();
+      if (renderObj is! RenderBox || !renderObj.hasSize) return;
+
+      final topLeft = renderObj.localToGlobal(Offset.zero);
+      final size = renderObj.size;
+      if (size.width < 16 || size.height < 16) return;
+
+      final dpr = MediaQuery.devicePixelRatioOf(ctx);
+      final l = (topLeft.dx * dpr).round();
+      final t = (topLeft.dy * dpr).round();
+      final r = ((topLeft.dx + size.width) * dpr).round();
+      final b = ((topLeft.dy + size.height) * dpr).round();
+
+      if (l != _lastL || t != _lastT || r != _lastR || b != _lastB) {
+        _lastL = l;
+        _lastT = t;
+        _lastR = r;
+        _lastB = b;
+        widget.onCaptureRectChanged!(l, t, r, b);
+      }
+    });
+  }
 
   String _formatDuration(Duration d) {
     final hours = d.inHours.toString().padLeft(2, '0');
@@ -70,25 +128,29 @@ class LiveProgramMonitor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasCameraFeed = activeCamera != null && activeCamera!.stream != null;
-    final hasVideoFeed = isPlayingLocalVideo &&
-        localVideoController != null &&
-        localVideoController!.value.isInitialized;
-    final hasFullscreenImage = imageOverlay.isVisible &&
-        imageOverlay.hasImage &&
-        imageOverlay.placement == ImageOverlayPlacement.fullscreenSlide;
-    final hasCornerLogo = imageOverlay.isVisible &&
-        imageOverlay.hasImage &&
-        imageOverlay.placement != ImageOverlayPlacement.fullscreenSlide;
-    final hasAnyLiveFeed = hasCameraFeed || hasVideoFeed || hasFullscreenImage;
-    final stats = activeCamera?.stats;
+    _scheduleRectReport();
 
-    return Container(
+    final hasCameraFeed =
+        widget.activeCamera != null && widget.activeCamera!.stream != null;
+    final hasVideoFeed = widget.isPlayingLocalVideo &&
+        widget.localVideoController != null &&
+        widget.localVideoController!.value.isInitialized;
+    final hasFullscreenImage = widget.imageOverlay.isVisible &&
+        widget.imageOverlay.hasImage &&
+        widget.imageOverlay.placement == ImageOverlayPlacement.fullscreenSlide;
+    final hasCornerLogo = widget.imageOverlay.isVisible &&
+        widget.imageOverlay.hasImage &&
+        widget.imageOverlay.placement != ImageOverlayPlacement.fullscreenSlide;
+    final hasAnyLiveFeed = hasCameraFeed || hasVideoFeed || hasFullscreenImage;
+    final stats = widget.activeCamera?.stats;
+
+    final pureCanvas = Container(
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.black,
-        borderRadius: cleanMode ? BorderRadius.zero : BorderRadius.circular(14),
-        border: cleanMode
+        borderRadius:
+            widget.cleanMode ? BorderRadius.zero : BorderRadius.circular(10),
+        border: widget.cleanMode
             ? null
             : Border.all(
                 color:
@@ -97,431 +159,422 @@ class LiveProgramMonitor extends StatelessWidget {
               ),
       ),
       clipBehavior: Clip.antiAlias,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final logoWidth =
-              (constraints.maxWidth * imageOverlay.sizeFactor).clamp(64.0, 260.0);
-          final watermarkWidth =
-              (constraints.maxWidth * watermarkConfig.scale).clamp(48.0, 280.0);
-          final watermarkTopOffset = cleanMode ? 16.0 : 48.0;
+      child: KeyedSubtree(
+        key: _canvasKey,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final logoWidth =
+                (constraints.maxWidth * widget.imageOverlay.sizeFactor)
+                    .clamp(64.0, 260.0);
+            final watermarkWidth =
+                (constraints.maxWidth * widget.watermarkConfig.scale)
+                    .clamp(48.0, 280.0);
 
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              // === NIVEL 1 (BASE): Cámara activa o Video/Placa de Pauta Media ===
-              if (hasVideoFeed)
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: localVideoController!.value.aspectRatio > 0
-                        ? localVideoController!.value.aspectRatio
-                        : 16 / 9,
-                    child: VideoPlayer(localVideoController!),
-                  ),
-                )
-              else if (hasCameraFeed)
-                RTCVideoView(
-                  programRenderer,
-                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-                )
-              else if (!hasFullscreenImage)
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.live_tv_rounded,
-                      size: 54,
-                      color: Colors.grey.shade700,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'ESPERANDO SEÑAL DE CÁMARAS EN LA RED WI-FI',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.1,
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // === NIVEL 1 (BASE): Cámara activa o Video/Placa a cuadro completo ===
+                if (hasVideoFeed)
+                  _buildVideoLayer(widget.localVideoController!)
+                else if (hasCameraFeed)
+                  RTCVideoView(
+                    widget.programRenderer,
+                    objectFit: widget.fillFrame
+                        ? RTCVideoViewObjectFit.RTCVideoViewObjectFitCover
+                        : RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                  )
+                else if (!hasFullscreenImage)
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.live_tv_rounded,
+                        size: 46,
+                        color: Colors.grey.shade700,
                       ),
-                    ),
-                  ],
-                ),
-
-              // Placa a pantalla completa de Pauta Media (Nivel Base)
-              if (hasFullscreenImage)
-                Container(
-                  color: Colors.black,
-                  alignment: Alignment.center,
-                  child: Image.file(
-                    File(imageOverlay.filePath!),
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      const SizedBox(height: 8),
+                      Text(
+                        'ESPERANDO SEÑAL DE CÁMARAS EN LA RED WI-FI',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.grey.shade500,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.9,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
 
-              // Cortina FADE del Nivel Base (las capas DSK y Marca de Agua permanecen firmes encima)
-              IgnorePointer(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 160),
-                  opacity: isFadingTransition ? 1.0 : 0.0,
-                  child: Container(color: Colors.black),
-                ),
-              ),
+                // Placa a pantalla completa de Pauta Media (Nivel Base)
+                if (hasFullscreenImage)
+                  Container(
+                    color: Colors.black,
+                    alignment: Alignment.center,
+                    child: Image.file(
+                      File(widget.imageOverlay.filePath!),
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: widget.fillFrame ? BoxFit.cover : BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
 
-              // === NIVEL 2 (MEDIO — DOWNSTREAM KEYER): Plantillas / Cintillos con transparencia ===
-              ...overlayLayers.map((layer) {
-                final vc = layer.format.isVideo
-                    ? overlayVideoControllerFor?.call(layer.id)
-                    : null;
-                final canRender = !layer.format.isVideo ||
-                    (vc != null && vc.value.isInitialized);
-
-                return IgnorePointer(
-                  key: ValueKey('dsk_${layer.id}'),
+                // Cortina FADE del Nivel Base (Capas DSK y Marca de Agua quedan firmes encima)
+                IgnorePointer(
                   child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 240),
-                    curve: Curves.easeInOut,
-                    opacity: (layer.isActive && canRender) ? layer.opacity : 0.0,
-                    child: Align(
-                      alignment: layer.position.alignment,
-                      child: layer.format.isVideo
-                          ? (vc != null && vc.value.isInitialized
-                              ? AspectRatio(
-                                  aspectRatio: vc.value.aspectRatio > 0
-                                      ? vc.value.aspectRatio
-                                      : 16 / 9,
-                                  child: VideoPlayer(vc),
-                                )
-                              : const SizedBox.shrink())
-                          : Image.file(
-                              File(layer.filePath),
-                              fit: BoxFit.contain,
-                              gaplessPlayback: true,
-                              errorBuilder: (_, __, ___) =>
-                                  const SizedBox.shrink(),
-                            ),
-                    ),
-                  ),
-                );
-              }),
-
-              // Logo de esquina rápido desde Pauta (compatibilidad)
-              if (hasCornerLogo)
-                Positioned(
-                  top: cleanMode ? 18 : 54,
-                  right: imageOverlay.placement ==
-                          ImageOverlayPlacement.topRightLogo
-                      ? 18
-                      : null,
-                  left: imageOverlay.placement ==
-                          ImageOverlayPlacement.topLeftLogo
-                      ? 18
-                      : null,
-                  child: IgnorePointer(
-                    child: SizedBox(
-                      width: logoWidth,
-                      child: Image.file(
-                        File(imageOverlay.filePath!),
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                      ),
-                    ),
+                    duration: const Duration(milliseconds: 160),
+                    opacity: widget.isFadingTransition ? 1.0 : 0.0,
+                    child: Container(color: Colors.black),
                   ),
                 ),
 
-              // Rótulo de texto Lower Third (Nivel Medio)
-              Positioned(
-                left: 18,
-                bottom: 18,
-                child: IgnorePointer(
-                  child: AnimatedSlide(
-                    duration: const Duration(milliseconds: 280),
-                    curve: Curves.easeOutCubic,
-                    offset: overlayConfig.isVisible
-                        ? Offset.zero
-                        : const Offset(-0.25, 0),
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 240),
-                      opacity: overlayConfig.isVisible ? 1.0 : 0.0,
-                      child: Container(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0F172A).withAlpha(225),
-                          borderRadius: BorderRadius.circular(8),
-                          border: const Border(
-                            left: BorderSide(
-                              color: Color(0xFFEF4444),
-                              width: 5,
-                            ),
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (overlayConfig.title.isNotEmpty)
-                              Text(
-                                overlayConfig.title,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            if (overlayConfig.subtitle.isNotEmpty) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                overlayConfig.subtitle,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.grey.shade300,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+                // === NIVEL 2 (MEDIO — DOWNSTREAM KEYER): Plantillas / Cintillos con transparencia ===
+                ...widget.overlayLayers.map((layer) {
+                  final vc = layer.format.isVideo
+                      ? widget.overlayVideoControllerFor?.call(layer.id)
+                      : null;
+                  final canRender = !layer.format.isVideo ||
+                      (vc != null && vc.value.isInitialized);
 
-              // === NIVEL 3 (SUPERIOR): Marca de Agua / Logo fija con opacidad y escala ===
-              if (watermarkConfig.hasImage)
-                Positioned(
-                  top: (watermarkConfig.corner == WatermarkCorner.topRight ||
-                          watermarkConfig.corner == WatermarkCorner.topLeft)
-                      ? watermarkTopOffset
-                      : null,
-                  bottom:
-                      (watermarkConfig.corner == WatermarkCorner.bottomRight ||
-                              watermarkConfig.corner ==
-                                  WatermarkCorner.bottomLeft)
-                          ? 16.0
-                          : null,
-                  right: (watermarkConfig.corner == WatermarkCorner.topRight ||
-                          watermarkConfig.corner ==
-                              WatermarkCorner.bottomRight)
-                      ? 16.0
-                      : null,
-                  left: (watermarkConfig.corner == WatermarkCorner.topLeft ||
-                          watermarkConfig.corner == WatermarkCorner.bottomLeft)
-                      ? 16.0
-                      : null,
-                  child: IgnorePointer(
+                  return IgnorePointer(
+                    key: ValueKey('dsk_${layer.id}'),
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 240),
                       curve: Curves.easeInOut,
-                      opacity: watermarkConfig.isVisible
-                          ? watermarkConfig.opacity
-                          : 0.0,
+                      opacity:
+                          (layer.isActive && canRender) ? layer.opacity : 0.0,
+                      child: Align(
+                        alignment: layer.position.alignment,
+                        child: layer.format.isVideo
+                            ? (vc != null && vc.value.isInitialized
+                                ? AspectRatio(
+                                    aspectRatio: vc.value.aspectRatio > 0
+                                        ? vc.value.aspectRatio
+                                        : 16 / 9,
+                                    child: VideoPlayer(vc),
+                                  )
+                                : const SizedBox.shrink())
+                            : Image.file(
+                                File(layer.filePath),
+                                fit: BoxFit.contain,
+                                gaplessPlayback: true,
+                                errorBuilder: (_, __, ___) =>
+                                    const SizedBox.shrink(),
+                              ),
+                      ),
+                    ),
+                  );
+                }),
+
+                // Logo de esquina rápido desde Pauta (compatibilidad)
+                if (hasCornerLogo)
+                  Positioned(
+                    top: 14,
+                    right: widget.imageOverlay.placement ==
+                            ImageOverlayPlacement.topRightLogo
+                        ? 14
+                        : null,
+                    left: widget.imageOverlay.placement ==
+                            ImageOverlayPlacement.topLeftLogo
+                        ? 14
+                        : null,
+                    child: IgnorePointer(
                       child: SizedBox(
-                        width: watermarkWidth,
+                        width: logoWidth,
                         child: Image.file(
-                          File(watermarkConfig.filePath!),
+                          File(widget.imageOverlay.filePath!),
                           fit: BoxFit.contain,
-                          gaplessPlayback: true,
                           errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                         ),
                       ),
                     ),
                   ),
-                ),
 
-              // 6. Badges técnicos del Director (ocultos en Clean Broadcast Mode)
-              if (!cleanMode) ...[
+                // Rótulo de texto Lower Third (Nivel Medio)
                 Positioned(
-                  top: 12,
-                  left: 12,
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: hasAnyLiveFeed
-                              ? const Color(0xFFEF4444)
-                              : Colors.grey.shade800,
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.circle,
-                              size: 9,
-                              color: Colors.white,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              hasFullscreenImage
-                                  ? 'PLACA EN VIVO'
-                                  : hasVideoFeed
-                                      ? 'VIDEO EN VIVO'
-                                      : hasCameraFeed
-                                          ? 'EN VIVO (PGM)'
-                                          : 'SIN SEÑAL',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 12,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (hasCameraFeed &&
-                          !hasVideoFeed &&
-                          !hasFullscreenImage) ...[
-                        const SizedBox(width: 10),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
+                  left: 16,
+                  bottom: 16,
+                  child: IgnorePointer(
+                    child: AnimatedSlide(
+                      duration: const Duration(milliseconds: 280),
+                      curve: Curves.easeOutCubic,
+                      offset: widget.overlayConfig.isVisible
+                          ? Offset.zero
+                          : const Offset(-0.25, 0),
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 240),
+                        opacity: widget.overlayConfig.isVisible ? 1.0 : 0.0,
+                        child: Container(
+                          constraints: const BoxConstraints(maxWidth: 420),
                           decoration: BoxDecoration(
-                            color: Colors.black.withAlpha(180),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            'CAM ${activeCamera!.slotIndex + 1} • ${activeCamera!.name}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-                // Badges RTMP LIVE y REC arriba a la derecha
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (isRtmpLive)
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEF4444),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.sensors_rounded,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                rtmpBitrateKbps != null
-                                    ? 'STREAM ${rtmpBitrateKbps!}k'
-                                    : 'STREAM LIVE',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 11.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (isRecording)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withAlpha(195),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: const Color(0xFFEF4444),
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(
-                                Icons.fiber_manual_record,
-                                size: 13,
+                            color: const Color(0xFF0F172A).withAlpha(225),
+                            borderRadius: BorderRadius.circular(8),
+                            border: const Border(
+                              left: BorderSide(
                                 color: Color(0xFFEF4444),
+                                width: 5,
                               ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'REC ${_formatDuration(recordingDuration)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 12,
-                                  fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (widget.overlayConfig.title.isNotEmpty)
+                                Text(
+                                  widget.overlayConfig.title,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
                                 ),
-                              ),
+                              if (widget.overlayConfig.subtitle.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.overlayConfig.subtitle,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade300,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
-                    ],
+                      ),
+                    ),
                   ),
                 ),
 
-                // HUD de telemetría WebRTC abajo a la derecha
-                if (showTelemetry &&
-                    hasCameraFeed &&
-                    !hasVideoFeed &&
-                    stats != null)
+                // === NIVEL 3 (SUPERIOR): Marca de Agua / Logo fija con opacidad y escala ===
+                if (widget.watermarkConfig.hasImage)
                   Positioned(
-                    right: 12,
-                    bottom: 12,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withAlpha(190),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.white12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.signal_cellular_alt_rounded,
-                            size: 14,
-                            color: _healthColor(stats.health),
+                    top: (widget.watermarkConfig.corner ==
+                                WatermarkCorner.topRight ||
+                            widget.watermarkConfig.corner ==
+                                WatermarkCorner.topLeft)
+                        ? 14.0
+                        : null,
+                    bottom: (widget.watermarkConfig.corner ==
+                                WatermarkCorner.bottomRight ||
+                            widget.watermarkConfig.corner ==
+                                WatermarkCorner.bottomLeft)
+                        ? 14.0
+                        : null,
+                    right: (widget.watermarkConfig.corner ==
+                                WatermarkCorner.topRight ||
+                            widget.watermarkConfig.corner ==
+                                WatermarkCorner.bottomRight)
+                        ? 14.0
+                        : null,
+                    left: (widget.watermarkConfig.corner ==
+                                WatermarkCorner.topLeft ||
+                            widget.watermarkConfig.corner ==
+                                WatermarkCorner.bottomLeft)
+                        ? 14.0
+                        : null,
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 240),
+                        curve: Curves.easeInOut,
+                        opacity: widget.watermarkConfig.isVisible
+                            ? widget.watermarkConfig.opacity
+                            : 0.0,
+                        child: SizedBox(
+                          width: watermarkWidth,
+                          child: Image.file(
+                            File(widget.watermarkConfig.filePath!),
+                            fit: BoxFit.contain,
+                            gaplessPlayback: true,
+                            errorBuilder: (_, __, ___) =>
+                                const SizedBox.shrink(),
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            stats.compactSummary,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white70,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
               ],
+            );
+          },
+        ),
+      ),
+    );
+
+    if (widget.cleanMode) {
+      return pureCanvas;
+    }
+
+    // En Modo Director: barra técnica delgada FUERA del cuadro rojo (arriba)
+    // para que la grabación y transmisión salgan 100% limpias sin ningún badge encima.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 22,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: hasAnyLiveFeed
+                      ? const Color(0xFFEF4444)
+                      : Colors.grey.shade800,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.circle, size: 7, color: Colors.white),
+                    const SizedBox(width: 4),
+                    Text(
+                      hasFullscreenImage
+                          ? 'PLACA EN VIVO'
+                          : hasVideoFeed
+                              ? 'VIDEO EN VIVO'
+                              : hasCameraFeed
+                                  ? 'EN VIVO (PGM)'
+                                  : 'SIN SEÑAL',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 9.5,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasCameraFeed && !hasVideoFeed && !hasFullscreenImage) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'CAM ${widget.activeCamera!.slotIndex + 1} • ${widget.activeCamera!.name}',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+              ] else
+                const Spacer(),
+              if (hasCameraFeed && !hasVideoFeed && !hasFullscreenImage)
+                const Spacer(),
+              if (widget.isRtmpLive)
+                Container(
+                  margin: const EdgeInsets.only(right: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    widget.rtmpBitrateKbps != null
+                        ? 'LIVE ${widget.rtmpBitrateKbps!}k'
+                        : 'LIVE',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 9,
+                    ),
+                  ),
+                ),
+              if (widget.isRecording)
+                Container(
+                  margin: const EdgeInsets.only(right: 5),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF97316).withAlpha(45),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFFF97316)),
+                  ),
+                  child: Text(
+                    '● REC ${_formatDuration(widget.recordingDuration)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 9,
+                      color: Color(0xFFFDBA74),
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              if (widget.showTelemetry &&
+                  hasCameraFeed &&
+                  !hasVideoFeed &&
+                  stats != null) ...[
+                Icon(
+                  Icons.signal_cellular_alt_rounded,
+                  size: 12,
+                  color: _healthColor(stats.health),
+                ),
+                const SizedBox(width: 3),
+                Text(
+                  stats.compactSummary,
+                  style: const TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white60,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
+              if (widget.onToggleFillFrame != null)
+                InkWell(
+                  onTap: widget.onToggleFillFrame,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.white10,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      widget.fillFrame ? 'LLENAR' : 'AJUSTAR',
+                      style: const TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF60A5FA),
+                      ),
+                    ),
+                  ),
+                ),
             ],
-          );
-        },
+          ),
+        ),
+        const SizedBox(height: 3),
+        Expanded(child: pureCanvas),
+      ],
+    );
+  }
+
+  Widget _buildVideoLayer(VideoPlayerController vc) {
+    final aspect = vc.value.aspectRatio > 0 ? vc.value.aspectRatio : 16 / 9;
+    if (widget.fillFrame) {
+      return ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: aspect * 100,
+            height: 100,
+            child: VideoPlayer(vc),
+          ),
+        ),
+      );
+    }
+    return Center(
+      child: AspectRatio(
+        aspectRatio: aspect,
+        child: VideoPlayer(vc),
       ),
     );
   }
