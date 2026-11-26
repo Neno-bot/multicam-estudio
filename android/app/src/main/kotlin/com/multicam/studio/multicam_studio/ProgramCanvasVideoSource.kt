@@ -2,6 +2,7 @@ package com.multicam.studio.multicam_studio
 
 import android.graphics.SurfaceTexture
 import android.view.Surface
+import com.pedro.encoder.input.sources.OrientationForced
 import com.pedro.encoder.input.sources.video.VideoSource
 
 /**
@@ -56,4 +57,8 @@ class ProgramCanvasVideoSource : VideoSource() {
     }
 
     override fun isRunning(): Boolean = running
+
+    // Evita que RootEncoder aplique la rotación de 270° pensada para sensores de cámara vertical;
+    // fuerza orientación horizontal pura (0°) en grabación MP4 y transmisión RTMP.
+    override fun getOrientationConfig(): OrientationForced = OrientationForced.LANDSCAPE
 }
