@@ -9,20 +9,23 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.view.PixelCopy
 import android.view.Surface
+import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
 import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Captura EXCLUSIVAMENTE el rectángulo del Monitor EN VIVO (cuadro rojo)
- * directamente desde la ventana de NenoCam Studio usando PixelCopy.
+ * desde FlutterTextureView / Activity.window sin usar MediaProjection.
  *
- * Ventajas clave:
- * - NO usa MediaProjection (nunca muestra el aviso "Compartir pantalla / una app").
- * - NUNCA captura notificaciones de WhatsApp, mensajes, barra de estado ni botones del Director.
- * - Escala el cuadro EN VIVO a 16:9 completo sin bordes negros.
+ * - Cero aviso "Compartir pantalla / una app".
+ * - Cero notificaciones de WhatsApp, mensajes, barra de estado ni botones del Director.
+ * - Escribe cuadros RGBA vía lockCanvas(null) en la SurfaceTexture de RootEncoder (OpenGL ES)
+ *   para máxima compatibilidad en Samsung Exynos, Snapdragon y MediaTek.
  */
 object ProgramCanvasCapture {
 
@@ -60,10 +63,18 @@ object ProgramCanvasCapture {
 
     fun getActivity(): Activity? = activityRef?.get()
 
-    /**
-     * Calcula el rectángulo exacto dentro de Activity.window (en píxeles físicos)
-     * sumando el desplazamiento de la vista raíz (recorte de cámara / barra de estado).
-     */
+    fun findTextureView(root: View?): TextureView? {
+        if (root == null) return null
+        if (root is TextureView && root.isAvailable) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                val found = findTextureView(root.getChildAt(i))
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
     fun computeWindowCropRect(activity: Activity): Rect? {
         val decor = activity.window?.decorView ?: return null
         val decorW = decor.width
@@ -76,26 +87,19 @@ object ProgramCanvasCapture {
         val offsetX = loc[0]
         val offsetY = loc[1]
 
-        val rawL = cropLeft + offsetX
-        val rawT = cropTop + offsetY
-        val rawR = cropRight + offsetX
-        val rawB = cropBottom + offsetY
-
-        val l = rawL.coerceIn(0, decorW - 2)
-        val t = rawT.coerceIn(0, decorH - 2)
-        val r = rawR.coerceIn(l + 2, decorW)
-        val b = rawB.coerceIn(t + 2, decorH)
-
-        // Si aún no se reportó un rectángulo válido desde Flutter, usar la ventana completa
         if ((cropRight - cropLeft) < 32 || (cropBottom - cropTop) < 32) {
             return Rect(0, 0, decorW, decorH)
         }
+
+        val l = (cropLeft + offsetX).coerceIn(0, decorW - 2)
+        val t = (cropTop + offsetY).coerceIn(0, decorH - 2)
+        val r = (cropRight + offsetX).coerceIn(l + 2, decorW)
+        val b = (cropBottom + offsetY).coerceIn(t + 2, decorH)
         return Rect(l, t, r, b)
     }
 
     /**
-     * Bomba de fotogramas dedicada que copia únicamente el cuadro EN VIVO
-     * hacia una Surface de salida (MediaRecorder o RootEncoder SurfaceTexture).
+     * Bomba de fotogramas que entrega cuadros del cuadro EN VIVO a RootEncoder (SurfaceTexture).
      */
     class FramePump(
         private val targetSurface: Surface,
@@ -107,6 +111,7 @@ object ProgramCanvasCapture {
         private val inFlight = AtomicBoolean(false)
         private var workerThread: HandlerThread? = null
         private var workerHandler: Handler? = null
+        private val mainHandler = Handler(Looper.getMainLooper())
         private var copyBitmap: Bitmap? = null
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
         private val destRect = Rect(0, 0, outWidth, outHeight)
@@ -162,9 +167,8 @@ object ProgramCanvasCapture {
                 return
             }
 
-            val bmp = ensureBitmap(rect.width(), rect.height())
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val bmp = ensureBitmap(rect.width(), rect.height())
                 try {
                     PixelCopy.request(
                         window,
@@ -173,7 +177,9 @@ object ProgramCanvasCapture {
                         { copyResult ->
                             try {
                                 if (copyResult == PixelCopy.SUCCESS && running.get() && targetSurface.isValid) {
-                                    drawBitmapToSurface(bmp)
+                                    drawBitmapToSurface(bmp, null)
+                                } else if (running.get() && targetSurface.isValid) {
+                                    captureFromTextureViewFallback(activity, rect)
                                 }
                             } finally {
                                 inFlight.set(false)
@@ -185,18 +191,37 @@ object ProgramCanvasCapture {
                     inFlight.set(false)
                 }
             } else {
-                // Fallback para Android 7 o anterior
+                captureFromTextureViewFallback(activity, rect)
+                inFlight.set(false)
+            }
+        }
+
+        private fun captureFromTextureViewFallback(activity: Activity, windowRect: Rect) {
+            mainHandler.post {
+                if (!running.get() || !targetSurface.isValid) return@post
                 try {
-                    val view = window.decorView
-                    val c = Canvas(bmp)
-                    c.translate(-rect.left.toFloat(), -rect.top.toFloat())
-                    view.draw(c)
-                    if (running.get() && targetSurface.isValid) {
-                        drawBitmapToSurface(bmp)
+                    val tv = findTextureView(activity.window?.decorView) ?: return@post
+                    val fullBmp = tv.bitmap ?: return@post
+                    val loc = IntArray(2)
+                    tv.getLocationInWindow(loc)
+                    val srcL = (windowRect.left - loc[0]).coerceIn(0, fullBmp.width - 2)
+                    val srcT = (windowRect.top - loc[1]).coerceIn(0, fullBmp.height - 2)
+                    val srcR = (windowRect.right - loc[0]).coerceIn(srcL + 2, fullBmp.width)
+                    val srcB = (windowRect.bottom - loc[1]).coerceIn(srcT + 2, fullBmp.height)
+                    val srcRect = Rect(srcL, srcT, srcR, srcB)
+                    workerHandler?.post {
+                        try {
+                            if (running.get() && targetSurface.isValid) {
+                                drawBitmapToSurface(fullBmp, srcRect)
+                            }
+                        } finally {
+                            try {
+                                fullBmp.recycle()
+                            } catch (_: Exception) {
+                            }
+                        }
                     }
                 } catch (_: Exception) {
-                } finally {
-                    inFlight.set(false)
                 }
             }
         }
@@ -215,29 +240,21 @@ object ProgramCanvasCapture {
             return created
         }
 
-        private fun drawBitmapToSurface(src: Bitmap) {
-            if (!targetSurface.isValid) return
+        /**
+         * Usa lockCanvas(null) (software BufferQueue RGBA) directamente sobre Surface(surfaceTexture),
+         * lo cual dispara onFrameAvailable() en el pipeline OpenGL ES de RootEncoder sin generar cuadros negros.
+         */
+        private fun drawBitmapToSurface(src: Bitmap, srcRect: Rect?) {
+            if (!targetSurface.isValid || src.isRecycled) return
             var canvas: Canvas? = null
             try {
-                canvas = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    targetSurface.lockHardwareCanvas()
-                } else {
-                    targetSurface.lockCanvas(null)
-                }
+                canvas = targetSurface.lockCanvas(null)
                 if (canvas != null) {
                     canvas.drawColor(Color.BLACK)
-                    canvas.drawBitmap(src, null, destRect, paint)
+                    canvas.drawBitmap(src, srcRect, destRect, paint)
                 }
             } catch (_: Exception) {
-                try {
-                    canvas = targetSurface.lockCanvas(null)
-                    if (canvas != null) {
-                        canvas.drawColor(Color.BLACK)
-                        canvas.drawBitmap(src, null, destRect, paint)
-                    }
-                } catch (_: Exception) {
-                    canvas = null
-                }
+                canvas = null
             } finally {
                 if (canvas != null) {
                     try {

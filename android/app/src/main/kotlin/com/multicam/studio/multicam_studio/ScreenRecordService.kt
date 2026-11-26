@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
-import android.media.MediaRecorder
 import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
@@ -19,6 +18,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import com.pedro.common.ConnectChecker
+import com.pedro.encoder.input.sources.audio.MicrophoneSource
+import com.pedro.encoder.input.sources.audio.NoAudioSource
+import com.pedro.library.base.recording.RecordController
+import com.pedro.library.generic.GenericStream
 import java.io.File
 import java.io.FileInputStream
 import java.text.SimpleDateFormat
@@ -26,9 +30,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Graba EXCLUSIVAMENTE el Monitor EN VIVO (cuadro rojo) a 16:9 completo + micrófono
- * sin usar MediaProjection (cero avisos de "Compartir pantalla" y cero notificaciones),
- * y guarda el MP4 directamente en la Galería (Movies/NenoCam Studio).
+ * Graba EXCLUSIVAMENTE el Monitor EN VIVO (cuadro rojo) usando RootEncoder GenericStream
+ * (OpenGL ES + MediaCodec H.264/AAC) sin usar MediaProjection ni MediaRecorder Canvas,
+ * eliminando el video negro en Samsung Exynos/Android 15, y guarda el MP4 directo en Galería.
  */
 class ScreenRecordService : Service() {
 
@@ -50,11 +54,20 @@ class ScreenRecordService : Service() {
         var eventCallback: ((String, String) -> Unit)? = null
     }
 
-    private var mediaRecorder: MediaRecorder? = null
-    private var framePump: ProgramCanvasCapture.FramePump? = null
+    private var genericStream: GenericStream? = null
     private var tempOutputFile: File? = null
     private var outputFileName: String = ""
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val noopConnectChecker = object : ConnectChecker {
+        override fun onConnectionStarted(url: String) {}
+        override fun onConnectionSuccess() {}
+        override fun onConnectionFailed(reason: String) {}
+        override fun onNewBitrate(bitrate: Long) {}
+        override fun onDisconnect() {}
+        override fun onAuthError() {}
+        override fun onAuthSuccess() {}
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -107,7 +120,7 @@ class ScreenRecordService : Service() {
         audioEnabled: Boolean,
     ) {
         try {
-            cleanupHardware()
+            cleanupStream()
 
             val hasMicPermission = ContextCompat.checkSelfPermission(
                 this,
@@ -120,48 +133,48 @@ class ScreenRecordService : Service() {
             val cacheFile = File(cacheDir, outputFileName)
             tempOutputFile = cacheFile
 
-            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(this)
+            val videoSource = ProgramCanvasVideoSource()
+            val audioSource = if (useAudio) MicrophoneSource() else NoAudioSource()
+            val stream = GenericStream(applicationContext, noopConnectChecker, videoSource, audioSource)
+            stream.getGlInterface().setForceRender(true, 25)
+
+            val videoOk = stream.prepareVideo(width, height, bitrate, 25, 2, 0)
+            val audioOk = if (useAudio) {
+                stream.prepareAudio(44100, true, 128 * 1024)
             } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
+                true
             }
 
-            if (useAudio) {
-                recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            if (!videoOk || !audioOk) {
+                cleanupStream()
+                eventCallback?.invoke("error", "No se pudo inicializar el codificador H.264/AAC.")
+                finishService()
+                return
             }
-            recorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            recorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-            if (useAudio) {
-                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                recorder.setAudioEncodingBitRate(128_000)
-                recorder.setAudioSamplingRate(44100)
-            }
-            recorder.setVideoEncodingBitRate(bitrate)
-            recorder.setVideoFrameRate(25)
-            recorder.setVideoSize(width, height)
-            recorder.setOutputFile(cacheFile.absolutePath)
-            recorder.prepare()
 
-            val surface = recorder.surface
-            recorder.start()
-            mediaRecorder = recorder
+            genericStream = stream
+            stream.startRecord(
+                cacheFile.absolutePath,
+                object : RecordController.Listener {
+                    override fun onStatusChange(status: RecordController.Status) {
+                        if (status == RecordController.Status.RECORDING) {
+                            isRecording = true
+                        }
+                    }
 
-            val pump = ProgramCanvasCapture.FramePump(
-                targetSurface = surface,
-                outWidth = width,
-                outHeight = height,
-                fps = 25,
+                    override fun onNewBitrate(bitrate: Long) {}
+
+                    override fun onError(e: Exception) {
+                        isRecording = false
+                        eventCallback?.invoke("error", e.message ?: "Error durante la grabación")
+                    }
+                },
             )
-            framePump = pump
             isRecording = true
-            pump.start()
-
             eventCallback?.invoke("started", outputFileName)
         } catch (e: Exception) {
             isRecording = false
-            cleanupHardware()
+            cleanupStream()
             eventCallback?.invoke("error", e.message ?: "Error al iniciar la grabación")
             finishService()
         }
@@ -174,27 +187,20 @@ class ScreenRecordService : Service() {
         }
 
         isRecording = false
-        framePump?.stop()
-        framePump = null
-
-        try {
-            mediaRecorder?.stop()
-        } catch (_: Exception) {
-        }
-        cleanupHardware()
+        cleanupStream()
 
         val fileToSave = tempOutputFile
         val fileName = outputFileName.ifEmpty { "NenoCam_${System.currentTimeMillis()}.mp4" }
         tempOutputFile = null
 
-        if (fileToSave == null || !fileToSave.exists() || fileToSave.length() <= 0L) {
-            eventCallback?.invoke("error", "La grabación era demasiado corta para guardarse.")
-            finishService()
-            return
-        }
-
         Thread {
             try {
+                // Esperar breve instante para que Android MediaMuxer cierre el encabezado MP4
+                Thread.sleep(250)
+                if (fileToSave == null || !fileToSave.exists() || fileToSave.length() <= 0L) {
+                    eventCallback?.invoke("error", "La grabación era demasiado corta para guardarse.")
+                    return@Thread
+                }
                 val savedLocation = publishToGallery(fileToSave, fileName)
                 fileToSave.delete()
                 eventCallback?.invoke("saved", savedLocation)
@@ -251,16 +257,15 @@ class ScreenRecordService : Service() {
         }
     }
 
-    private fun cleanupHardware() {
-        framePump?.stop()
-        framePump = null
-
+    private fun cleanupStream() {
         try {
-            mediaRecorder?.reset()
-            mediaRecorder?.release()
+            if (genericStream?.isRecording == true) {
+                genericStream?.stopRecord()
+            }
+            genericStream?.release()
         } catch (_: Exception) {
         }
-        mediaRecorder = null
+        genericStream = null
     }
 
     private fun finishService() {
@@ -304,7 +309,7 @@ class ScreenRecordService : Service() {
 
     override fun onDestroy() {
         isRecording = false
-        cleanupHardware()
+        cleanupStream()
         super.onDestroy()
     }
 

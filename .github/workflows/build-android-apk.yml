@@ -239,8 +239,8 @@ jobs:
             gh release delete-asset latest-android-test MultiCam-Studio-arm64.apk --yes >/dev/null 2>&1 || true
             gh release delete-asset latest-android-test MultiCam-Studio-armv7.apk --yes >/dev/null 2>&1 || true
             gh release edit latest-android-test \
-              --title "NenoCam Studio v1.7.0 (Captura Limpia Solo Cuadro EN VIVO — Sin Notificaciones ni Popups)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora transmite y graba EXCLUSIVAMENTE el cuadro rojo EN VIVO a 16:9 completo sin bordes negros, sin botones del Director, sin notificaciones de WhatsApp y sin aviso de compartir pantalla." \
+              --title "NenoCam Studio v1.7.1 (Fix Video Negro: FlutterTextureView + OpenGL ES MediaCodec)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Corrige el video negro en grabación y transmisión usando FlutterTextureView + Skia + RootEncoder OpenGL ES MediaCodec, capturando exclusivamente el cuadro rojo EN VIVO a 16:9 completo." \
               --latest
             gh release upload latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
@@ -250,7 +250,7 @@ jobs:
             gh release create latest-android-test \
               build/app/outputs/flutter-apk/NenoCam-Studio-arm64.apk \
               build/app/outputs/flutter-apk/NenoCam-Studio-armv7.apk \
-              --title "NenoCam Studio v1.7.0 (Captura Limpia Solo Cuadro EN VIVO — Sin Notificaciones ni Popups)" \
-              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Ahora transmite y graba EXCLUSIVAMENTE el cuadro rojo EN VIVO a 16:9 completo sin bordes negros, sin botones del Director, sin notificaciones de WhatsApp y sin aviso de compartir pantalla." \
+              --title "NenoCam Studio v1.7.1 (Fix Video Negro: FlutterTextureView + OpenGL ES MediaCodec)" \
+              --notes "Descarga NenoCam-Studio-arm64.apk para teléfonos Samsung Galaxy y Tablets Android 64-bit. Corrige el video negro en grabación y transmisión usando FlutterTextureView + Skia + RootEncoder OpenGL ES MediaCodec, capturando exclusivamente el cuadro rojo EN VIVO a 16:9 completo." \
               --latest
           fi
