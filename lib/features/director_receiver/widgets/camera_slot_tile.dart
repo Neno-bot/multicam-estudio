@@ -59,72 +59,80 @@ class CameraSlotTile extends StatelessWidget {
           ),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (isConnected)
-              RTCVideoView(
-                camera!.renderer,
-                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20, left: 4, right: 4),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      camera != null
-                          ? Icons.sync_rounded
-                          : Icons.qr_code_2_rounded,
-                      color: camera != null
-                          ? Colors.amber
-                          : const Color(0xFF60A5FA),
-                      size: 20,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showCompactTelemetry =
+                isConnected &&
+                showTelemetry &&
+                camera!.stats != null &&
+                constraints.maxWidth >= 175;
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                if (isConnected)
+                  RTCVideoView(
+                    camera!.renderer,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 20, left: 4, right: 4),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          camera != null
+                              ? Icons.sync_rounded
+                              : Icons.qr_code_2_rounded,
+                          color: camera != null
+                              ? Colors.amber
+                              : const Color(0xFF60A5FA),
+                          size: 20,
+                        ),
+                        const SizedBox(height: 3),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            camera != null
+                                ? 'Conectando...'
+                                : '+ AÑADIR QR',
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: Colors.grey.shade400,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 3),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
+                  ),
+
+                // Badge compacto de telemetría solo cuando el slot tiene ancho suficiente (evita solaparse con controles en teléfono)
+                if (showCompactTelemetry)
+                  Positioned(
+                    top: 6,
+                    left: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withAlpha(175),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
                       child: Text(
-                        camera != null
-                            ? 'Conectando...'
-                            : '+ AÑADIR QR',
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: Colors.grey.shade400,
+                        '${camera!.stats!.resolutionLabel} ${camera!.stats!.fps.round()}fps',
+                        style: const TextStyle(
                           fontSize: 9.5,
                           fontWeight: FontWeight.w700,
+                          color: Colors.white70,
                         ),
                       ),
                     ),
-                  ],
-                ),
-              ),
-
-            // Badge compacto de telemetría arriba a la izquierda
-            if (isConnected && showTelemetry && camera!.stats != null)
-              Positioned(
-                top: 6,
-                left: 6,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 3,
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(175),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Text(
-                    '${camera!.stats!.resolutionLabel} ${camera!.stats!.fps.round()}fps',
-                    style: const TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ),
-              ),
 
             // Controles rápidos remotos (Mute / Calidad / Flip / Linterna)
             if (isConnected)
@@ -288,7 +296,9 @@ class CameraSlotTile extends StatelessWidget {
                 ),
               ),
             ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );

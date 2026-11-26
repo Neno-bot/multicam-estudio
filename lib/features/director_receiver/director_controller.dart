@@ -18,6 +18,7 @@ import '../../core/models/overlay_layer_item.dart';
 import '../../core/models/signaling_message.dart';
 import '../../core/models/video_quality_profile.dart';
 import '../../services/discovery/local_discovery_service.dart';
+import '../../services/recording/gallery_recorder_service.dart';
 import '../../services/recording/program_recorder_service.dart';
 import '../../services/signaling/director_signaling_server.dart';
 import '../../services/streaming/rtmp_stream_service.dart';
@@ -30,6 +31,7 @@ class DirectorController extends ChangeNotifier {
   final DirectorSignalingServer _signaling = DirectorSignalingServer();
   final DirectorWebRTCService _webrtc = DirectorWebRTCService();
   final ProgramRecorderService _recorder = ProgramRecorderService();
+  final GalleryRecorderService _galleryRecorder = GalleryRecorderService();
   final RtmpStreamService _rtmpService = RtmpStreamService();
   final ImagePicker _imagePicker = ImagePicker();
   final Uuid _uuid = const Uuid();
@@ -94,7 +96,10 @@ class DirectorController extends ChangeNotifier {
   String? _rtmpStatusMessage;
   String? _rtmpBitrateKbps;
 
-  // Grabación local MP4
+  // Grabación local MP4 (Galería Movies/NenoCam Studio)
+  StreamSubscription<GalleryRecordEvent>? _galleryRecordSub;
+  bool _isGalleryRecording = false;
+  String? _lastSavedRecordingMessage;
   Timer? _recordingTimer;
   Duration _recordingDuration = Duration.zero;
   String? _lastError;
@@ -142,8 +147,9 @@ class DirectorController extends ChangeNotifier {
       _rtmpStatus == RtmpStreamStatus.connecting;
   String? get rtmpStatusMessage => _rtmpStatusMessage;
   String? get rtmpBitrateKbps => _rtmpBitrateKbps;
-  bool get isRecording => _recorder.isRecording;
+  bool get isRecording => _isGalleryRecording || _recorder.isRecording;
   Duration get recordingDuration => _recordingDuration;
+  String? get lastSavedRecordingMessage => _lastSavedRecordingMessage;
   String? get lastError => _lastError;
 
   int get connectedCount => slots.where((s) => s != null).length;
@@ -193,6 +199,7 @@ class DirectorController extends ChangeNotifier {
     );
 
     _listenRtmpEvents();
+    _listenGalleryRecordEvents();
     _startTelemetryPolling();
     _isRunning = true;
     _safeNotify();
@@ -227,6 +234,54 @@ class DirectorController extends ChangeNotifier {
       }
       _safeNotify();
     });
+  }
+
+  void _listenGalleryRecordEvents() {
+    _galleryRecordSub?.cancel();
+    _galleryRecordSub = _galleryRecorder.events.listen((evt) {
+      if (_isDisposed) return;
+      switch (evt.event) {
+        case 'started':
+          _isGalleryRecording = true;
+          _recordingDuration = Duration.zero;
+          _recordingTimer?.cancel();
+          _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+            if (_isDisposed) return;
+            _recordingDuration += const Duration(seconds: 1);
+            _safeNotify();
+          });
+          break;
+        case 'saved':
+          _isGalleryRecording = false;
+          _recordingTimer?.cancel();
+          _recordingTimer = null;
+          _recordingDuration = Duration.zero;
+          _cleanBroadcastMode = false;
+          _lastSavedRecordingMessage = 'Video guardado en ${evt.message}';
+          break;
+        case 'error':
+          _isGalleryRecording = false;
+          _recordingTimer?.cancel();
+          _recordingTimer = null;
+          _recordingDuration = Duration.zero;
+          _cleanBroadcastMode = false;
+          _lastError = evt.message;
+          break;
+      }
+      _safeNotify();
+    });
+  }
+
+  String? consumeLastSavedRecordingMessage() {
+    final msg = _lastSavedRecordingMessage;
+    _lastSavedRecordingMessage = null;
+    return msg;
+  }
+
+  String? consumeLastError() {
+    final err = _lastError;
+    _lastError = null;
+    return err;
   }
 
   void _startTelemetryPolling() {
@@ -690,6 +745,11 @@ class DirectorController extends ChangeNotifier {
     required bool enterCleanMode,
   }) async {
     _lastError = null;
+    if (_isGalleryRecording) {
+      _lastError = 'Detén primero la grabación en Galería antes de transmitir en vivo.';
+      _safeNotify();
+      return;
+    }
     try {
       _rtmpStatus = RtmpStreamStatus.connecting;
       _rtmpStatusMessage = 'Solicitando permiso de transmisión...';
@@ -1137,6 +1197,60 @@ class DirectorController extends ChangeNotifier {
     );
   }
 
+  /// Inicia la grabación completa de la producción directamente a la Galería (Movies/NenoCam Studio)
+  Future<void> startGalleryRecording({
+    int width = 1280,
+    int height = 720,
+    int bitrateKbps = 4000,
+    bool audioEnabled = true,
+    bool enterCleanMode = true,
+  }) async {
+    _lastError = null;
+    if (isRtmpLive) {
+      _lastError = 'Detén primero la transmisión EN VIVO antes de grabar a Galería.';
+      _safeNotify();
+      return;
+    }
+    try {
+      if (enterCleanMode) {
+        _cleanBroadcastMode = true;
+        _safeNotify();
+      }
+      await _galleryRecorder.startRecording(
+        width: width,
+        height: height,
+        bitrateKbps: bitrateKbps,
+        audioEnabled: audioEnabled,
+      );
+    } catch (e) {
+      _isGalleryRecording = false;
+      _cleanBroadcastMode = false;
+      _lastError = 'No se inició la grabación: $e';
+      _safeNotify();
+    }
+  }
+
+  /// Detiene la grabación activa y publica el MP4 en la Galería del dispositivo
+  Future<void> stopGalleryRecording() async {
+    if (_isGalleryRecording) {
+      try {
+        await _galleryRecorder.stopRecording();
+      } catch (e) {
+        _isGalleryRecording = false;
+        _recordingTimer?.cancel();
+        _recordingTimer = null;
+        _cleanBroadcastMode = false;
+        _lastError = 'Error al detener la grabación: $e';
+        _safeNotify();
+      }
+      return;
+    }
+
+    if (_recorder.isRecording) {
+      await toggleRecording();
+    }
+  }
+
   Future<List<String>?> toggleRecording() async {
     _lastError = null;
 
@@ -1224,8 +1338,12 @@ class DirectorController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _rtmpSub?.cancel();
+    _galleryRecordSub?.cancel();
     if (isRtmpLive) {
       _rtmpService.stopStream();
+    }
+    if (_isGalleryRecording) {
+      _galleryRecorder.stopRecording();
     }
     _disposeLocalVideo();
     for (final vc in _overlayVideoControllers.values) {

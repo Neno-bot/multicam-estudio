@@ -15,6 +15,7 @@ import 'widgets/lower_third_dialog.dart';
 import 'widgets/media_manager_dialog.dart';
 import 'widgets/media_pauta_panel.dart';
 import 'widgets/preview_monitor.dart';
+import 'widgets/record_gallery_dialog.dart';
 
 class DirectorScreen extends StatefulWidget {
   const DirectorScreen({super.key});
@@ -117,27 +118,36 @@ class _DirectorView extends StatelessWidget {
     BuildContext context,
     DirectorController ctrl,
   ) async {
-    final savedFiles = await ctrl.toggleRecording();
-    if (!context.mounted) return;
-
-    if (ctrl.lastError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ctrl.lastError!)),
-      );
+    if (ctrl.isRecording) {
+      await ctrl.stopGalleryRecording();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 3),
+            content: Text('Guardando grabación en tu Galería...'),
+          ),
+        );
+      }
       return;
     }
 
-    if (savedFiles != null && savedFiles.isNotEmpty) {
-      final count = savedFiles.length;
+    final config = await showDialog<GalleryRecordConfig>(
+      context: context,
+      builder: (_) => const RecordGalleryDialog(),
+    );
+    if (config == null || !context.mounted) return;
+
+    await ctrl.startGalleryRecording(
+      width: config.width,
+      height: config.height,
+      bitrateKbps: config.bitrateKbps,
+      audioEnabled: config.audioEnabled,
+      enterCleanMode: config.enterCleanMode,
+    );
+
+    if (context.mounted && ctrl.lastError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          content: Text(
-            count == 1
-                ? 'Grabación guardada: ${savedFiles.first}'
-                : 'Grabación guardada ($count clips): ${savedFiles.last}',
-          ),
-        ),
+        SnackBar(content: Text(ctrl.consumeLastError()!)),
       );
     }
   }
@@ -145,6 +155,21 @@ class _DirectorView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ctrl = context.watch<DirectorController>();
+
+    // Mostrar notificación inmediata cuando la grabación termina de guardarse en la Galería
+    if (ctrl.lastSavedRecordingMessage != null) {
+      final savedMsg = ctrl.consumeLastSavedRecordingMessage()!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF16A34A),
+            duration: const Duration(seconds: 5),
+            content: Text('✅ $savedMsg'),
+          ),
+        );
+      });
+    }
 
     final programMonitor = LiveProgramMonitor(
       programRenderer: ctrl.programRenderer,
@@ -258,6 +283,37 @@ class _DirectorView extends StatelessWidget {
                         );
                       }),
                     ],
+                    if (ctrl.isRecording) ...[
+                      const SizedBox(width: 6),
+                      InkWell(
+                        onTap: () => _handleToggleRecording(context, ctrl),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.stop_rounded, size: 13),
+                              SizedBox(width: 2),
+                              Text(
+                                'STOP REC',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(width: 4),
                     IconButton(
                       visualDensity: VisualDensity.compact,
@@ -319,6 +375,17 @@ class _DirectorView extends StatelessWidget {
                               color: const Color(0xFFEF4444),
                               highlighted: ctrl.isRtmpLive,
                               onTap: () => _showLiveStreamDialog(context, ctrl),
+                            ),
+                            const SizedBox(width: 7),
+                            _ActionChip(
+                              icon: ctrl.isRecording
+                                  ? Icons.stop_rounded
+                                  : Icons.fiber_manual_record_rounded,
+                              label: ctrl.isRecording ? 'STOP REC' : 'GRABAR',
+                              color: const Color(0xFFF97316),
+                              highlighted: ctrl.isRecording,
+                              onTap: () =>
+                                  _handleToggleRecording(context, ctrl),
                             ),
                             const SizedBox(width: 7),
                             _ActionChip(
@@ -419,17 +486,6 @@ class _DirectorView extends StatelessWidget {
                               color: const Color(0xFF60A5FA),
                               highlighted: ctrl.showTelemetry,
                               onTap: ctrl.toggleTelemetry,
-                            ),
-                            const SizedBox(width: 7),
-                            _ActionChip(
-                              icon: ctrl.isRecording
-                                  ? Icons.stop_rounded
-                                  : Icons.fiber_manual_record_rounded,
-                              label: ctrl.isRecording ? 'STOP' : 'REC',
-                              color: const Color(0xFFEF4444),
-                              highlighted: ctrl.isRecording,
-                              onTap: () =>
-                                  _handleToggleRecording(context, ctrl),
                             ),
                             const SizedBox(width: 7),
                             _StatusChip(
